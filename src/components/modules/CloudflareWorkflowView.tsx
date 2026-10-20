@@ -7,7 +7,7 @@ import {
 export const CloudflareWorkflowView: React.FC = () => {
   const [copied, setCopied] = useState<boolean>(false);
 
-  const workflowYaml = `name: Run TexFlow Server & Cloudflare Tunnel
+  const workflowYaml = `name: Run GarmentFlow Server & Cloudflare Tunnel
 
 on:
   workflow_dispatch:
@@ -16,17 +16,6 @@ on:
         description: "Server Run Duration in Hours (Max 5.8 hours due to GitHub limit)"
         required: true
         default: "5"
-      server_mode:
-        description: "Server runner mode"
-        required: true
-        default: "gunicorn"
-        type: choice
-        options:
-          - gunicorn
-          - python
-  # Optional: un-comment to automatically trigger on push
-  # push:
-  #   branches: [ main ]
 
 jobs:
   run-server-and-tunnel:
@@ -35,8 +24,14 @@ jobs:
     timeout-minutes: 360 # GitHub maximum limit is 360 minutes (6 hours)
 
     env:
-      FLASK_SECRET_KEY: \${{ secrets.FLASK_SECRET_KEY || 'production-secret-texflow-erp-9928' }}
       PORT: 5000
+      SECRET_KEY: \${{ secrets.SECRET_KEY || 'production-secret-garmentflow-erp-token-9928' }}
+      # Optional remote MySQL connection if configured in GitHub Secrets
+      MYSQL_HOST: \${{ secrets.MYSQL_HOST }}
+      MYSQL_PORT: \${{ secrets.MYSQL_PORT || '3306' }}
+      MYSQL_USER: \${{ secrets.MYSQL_USER }}
+      MYSQL_PASSWORD: \${{ secrets.MYSQL_PASSWORD }}
+      MYSQL_DB: \${{ secrets.MYSQL_DB || 'garmentflow_pro' }}
 
     steps:
       - name: 📥 Checkout Repository
@@ -54,7 +49,7 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
-            pip install Flask gunicorn xlsxwriter python-dotenv werkzeug requests
+            pip install Flask gunicorn xlsxwriter python-dotenv werkzeug PyMySQL mysql-connector-python cryptography
           fi
 
       - name: 🛡️ Install Cloudflare Tunnel CLI (cloudflared)
@@ -65,7 +60,7 @@ jobs:
           rm cloudflared.deb
           cloudflared --version
 
-      - name: 🗄️ Verify Database & Prepare Environment
+      - name: 🗄️ Verify Database & Prepare Application
         run: |
           echo "Checking application files..."
           ls -la
@@ -78,17 +73,10 @@ jobs:
 
       - name: 🚀 Start Flask Web Server
         run: |
-          echo "Starting TexFlow Backend Server on 127.0.0.1:\${PORT}..."
+          echo "Starting GarmentFlow Backend Server on 127.0.0.1:\${PORT}..."
           
-          SERVER_MODE="\${{ github.event.inputs.server_mode || 'gunicorn' }}"
-          
-          if [ "$SERVER_MODE" = "gunicorn" ]; then
-            echo "Starting with production Gunicorn WSGI..."
-            gunicorn --workers 3 --bind 127.0.0.1:5000 main:app --daemon --access-logfile - --error-logfile -
-          else
-            echo "Starting with native Python runtime..."
-            nohup python main.py > server.log 2>&1 &
-          fi
+          # Start gunicorn in background
+          gunicorn --workers 3 --bind 127.0.0.1:5000 main:app --daemon --access-logfile - --error-logfile -
           
           # Health check: Wait until server responds
           echo "Waiting for web server to initialize..."
@@ -101,60 +89,33 @@ jobs:
             sleep 1
           done
 
-      - name: 🌐 Connect & Run Cloudflare Tunnel
+      - name: 🌐 Connect & Run Cloudflare Tunnel (Token Only)
         env:
           CLOUDFLARE_TUNNEL_TOKEN: \${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
-          CLOUDFLARE_TUNNEL_ID: \${{ secrets.CLOUDFLARE_TUNNEL_ID }}
-          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_TUNNEL_CREDENTIALS: \${{ secrets.CLOUDFLARE_TUNNEL_CREDENTIALS }}
-          CUSTOM_DOMAIN: \${{ secrets.CUSTOM_DOMAIN }}
         run: |
           echo "=========================================================="
-          echo "       STARTING CLOUDFLARE TUNNEL CONNECTION              "
+          echo "     CONNECTING CLOUDFLARE TUNNEL VIA SECRET TOKEN        "
           echo "=========================================================="
           
-          # METHOD 1: Modern Cloudflare Tunnel Token (Recommended Zero-Trust method)
-          if [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
-            echo "Found CLOUDFLARE_TUNNEL_TOKEN in GitHub Secrets."
-            echo "Starting cloudflared tunnel with official connector token..."
+          if [ -z "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
+            echo "❌ ERROR: 'CLOUDFLARE_TUNNEL_TOKEN' secret is missing in GitHub Repository Secrets!"
+            echo "Please add it in: Settings -> Secrets and variables -> Actions -> New repository secret"
+            echo "Launching fallback TryCloudflare temporary tunnel so your job still connects..."
+            nohup cloudflared tunnel --url http://127.0.0.1:5000 > tunnel.log 2>&1 &
+            sleep 5
+            grep -o 'https://[-a-zA-Z0-9@:%._\\+~#=]*\\.trycloudflare.com' tunnel.log || true
+          else
+            echo "✅ Loaded CLOUDFLARE_TUNNEL_TOKEN from GitHub Secrets."
+            echo "Starting cloudflared tunnel..."
             nohup cloudflared tunnel --no-autoupdate run --token "$CLOUDFLARE_TUNNEL_TOKEN" > tunnel.log 2>&1 &
             TUNNEL_PID=$!
-            echo "Cloudflared PID: $TUNNEL_PID"
-
-          # METHOD 2: Credentials JSON / Tunnel ID Mode
-          elif [ -n "$CLOUDFLARE_TUNNEL_CREDENTIALS" ] && [ -n "$CLOUDFLARE_TUNNEL_ID" ]; then
-            echo "Found CLOUDFLARE_TUNNEL_CREDENTIALS and CLOUDFLARE_TUNNEL_ID."
-            mkdir -p ~/.cloudflared
-            echo "$CLOUDFLARE_TUNNEL_CREDENTIALS" > ~/.cloudflared/credentials.json
-            
-            cat <<EOF > ~/.cloudflared/config.yml
-          tunnel: $CLOUDFLARE_TUNNEL_ID
-          credentials-file: /home/runner/.cloudflared/credentials.json
-          ingress:
-            - hostname: \${CUSTOM_DOMAIN:-*}
-              service: http://127.0.0.1:5000
-            - service: http_status:404
-          EOF
-            
-            nohup cloudflared tunnel run "$CLOUDFLARE_TUNNEL_ID" > tunnel.log 2>&1 &
-            TUNNEL_PID=$!
-            echo "Cloudflared PID: $TUNNEL_PID"
-
-          # METHOD 3: Fallback Quick TryCloudflare Tunnel (Public Temporary URL)
-          else
-            echo "⚠️ WARNING: No Cloudflare Tunnel Secrets found!"
-            echo "Launching temporary Cloudflare TryCloudflare tunnel for demo..."
-            nohup cloudflared tunnel --url http://127.0.0.1:5000 > tunnel.log 2>&1 &
-            TUNNEL_PID=$!
+            echo "Cloudflared Process ID: $TUNNEL_PID"
             sleep 4
-            grep -o 'https://[-a-zA-Z0-9@:%._\\+~#=]*\\.trycloudflare.com' tunnel.log || true
+            echo "Recent Cloudflared Logs:"
+            tail -n 20 tunnel.log || true
           fi
-          
-          sleep 5
-          echo "Recent Tunnel Logs:"
-          tail -n 25 tunnel.log || true
 
-      - name: ⏳ Keep Server Active for Specified Duration (5 Hours)
+      - name: ⏳ Keep Server Active for 5 Hours
         env:
           INPUT_HOURS: \${{ github.event.inputs.duration_hours || '5' }}
         run: |
@@ -162,12 +123,12 @@ jobs:
           TOTAL_SECONDS=$((DURATION_HOURS * 3600))
           
           echo "=========================================================="
-          echo "🟢 TexFlow Server is LIVE and connected via Cloudflare!"
+          echo "🟢 Server & Cloudflare Tunnel are LIVE on your domain!"
           echo "⏱️ Target duration: $DURATION_HOURS hour(s) ($TOTAL_SECONDS seconds)"
           echo "=========================================================="
           
           START_TIME=$(date +%s)
-          INTERVAL=300 # Print heartbeat every 5 minutes (300s)
+          INTERVAL=300 # Print heartbeat every 5 minutes
           
           while true; do
             CURRENT_TIME=$(date +%s)
@@ -195,10 +156,9 @@ jobs:
       - name: 🧹 Graceful Server & Tunnel Teardown
         if: always()
         run: |
-          echo "Shutting down processes..."
+          echo "Shutting down server and tunnel..."
           pkill -f cloudflared || true
           pkill -f gunicorn || true
-          pkill -f "python main.py" || true
           echo "Teardown complete."`;
 
   const handleCopy = () => {
@@ -321,23 +281,23 @@ jobs:
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              <tr>
+              <tr className="bg-emerald-50/40">
                 <td className="py-2.5 px-3 font-mono font-bold text-emerald-700">CLOUDFLARE_TUNNEL_TOKEN</td>
-                <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">RECOMMENDED</span></td>
-                <td className="py-2.5 px-3 text-slate-600">Cloudflare Zero Trust connector token jo tunnel ko custom domain se connect karta hai</td>
+                <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-bold">ONLY REQUIRED SECRET</span></td>
+                <td className="py-2.5 px-3 text-slate-700 font-medium">Cloudflare Zero Trust connector token. Iss aik token se tunnel, account, aur custom domain sab khud hi bind ho jata hai.</td>
                 <td className="py-2.5 px-3 font-mono text-slate-500">eyJhIjoiY2...</td>
               </tr>
               <tr>
-                <td className="py-2.5 px-3 font-mono font-bold text-slate-800">FLASK_SECRET_KEY</td>
-                <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-bold">OPTIONAL</span></td>
-                <td className="py-2.5 px-3 text-slate-600">Flask session secret key for CSRF and login sessions</td>
-                <td className="py-2.5 px-3 font-mono text-slate-500">my-secret-key-123</td>
+                <td className="py-2.5 px-3 font-mono font-bold text-slate-800">SECRET_KEY</td>
+                <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-bold">OPTIONAL</span></td>
+                <td className="py-2.5 px-3 text-slate-600">Flask login session encryption key (default fallback already included)</td>
+                <td className="py-2.5 px-3 font-mono text-slate-500">custom_key_123</td>
               </tr>
               <tr>
-                <td className="py-2.5 px-3 font-mono font-bold text-slate-800">CUSTOM_DOMAIN</td>
-                <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-bold">OPTIONAL</span></td>
-                <td className="py-2.5 px-3 text-slate-600">Your domain name (agar credentials JSON method use kar rahe hon)</td>
-                <td className="py-2.5 px-3 font-mono text-slate-500">erp.mygarments.com</td>
+                <td className="py-2.5 px-3 font-mono font-bold text-slate-800">MYSQL_HOST</td>
+                <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-bold">OPTIONAL</span></td>
+                <td className="py-2.5 px-3 text-slate-600">Agar remote MySQL database use karna ho (agar na ho toh SQLite auto use hoga)</td>
+                <td className="py-2.5 px-3 font-mono text-slate-500">db.mycloud.com</td>
               </tr>
             </tbody>
           </table>

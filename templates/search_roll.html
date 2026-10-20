@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Search Roll Barcode | TexFlow ERP{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+    <h1 class="text-lg font-bold text-slate-900">Trace Fabric Roll (/search-roll)</h1>
+    <p class="text-xs text-slate-500 mt-1">Search any 7-digit roll barcode to view its full genealogy from knitting machine to shipment.</p>
+  </div>
+
+  <form method="GET" action="{{ url_for('search_roll') }}" class="bg-white p-4 rounded-xl border border-slate-200 flex items-center gap-3 max-w-lg">
+    <input type="text" name="roll_id" value="{{ search_query }}" required placeholder="Scan or enter 7-digit roll barcode..."
+      class="flex-1 px-3 py-2 border rounded-lg text-xs font-mono font-bold uppercase">
+    <button type="submit" class="px-5 py-2 bg-slate-900 text-white rounded-lg text-xs font-semibold">
+      Search Roll
+    </button>
+  </form>
+
+  {% if roll %}
+  <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-xs">
+    <div class="border-b pb-4 mb-4 flex justify-between items-center">
+      <div>
+        <span class="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-bold">Roll Found</span>
+        <h2 class="text-xl font-mono font-black mt-1">Barcode: {{ roll['roll_barcode'] }}</h2>
+      </div>
+      <div class="text-right">
+        <span class="text-xs text-slate-500 block">Created Timestamp</span>
+        <span class="font-mono text-xs text-slate-700">{{ roll['created_at'] }}</span>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+      <div class="p-3 bg-slate-50 rounded border">
+        <span class="text-slate-500 block">Work Order:</span>
+        <span class="font-bold font-mono">{{ roll['work_order'] }}</span>
+      </div>
+      <div class="p-3 bg-slate-50 rounded border">
+        <span class="text-slate-500 block">Bag Number:</span>
+        <span class="font-bold font-mono">{{ roll['bag_number'] }}</span>
+      </div>
+      <div class="p-3 bg-slate-50 rounded border">
+        <span class="text-slate-500 block">Fabric Shade:</span>
+        <span class="font-bold">{{ roll['shade'] }}</span>
+      </div>
+      <div class="p-3 bg-slate-50 rounded border">
+        <span class="text-slate-500 block">Lot Name:</span>
+        <span class="font-bold font-mono">{{ roll['lot_name'] }}</span>
+      </div>
+      <div class="p-3 bg-slate-50 rounded border">
+        <span class="text-slate-500 block">Roll Sequence:</span>
+        <span class="font-bold font-mono">Roll #{{ roll['roll_no'] }}</span>
+      </div>
+      <div class="p-3 bg-slate-50 rounded border">
+        <span class="text-slate-500 block">Produced Weight (PW):</span>
+        <span class="font-bold font-mono text-slate-900">{{ "%.2f"|format(roll['weight']) }} KG</span>
+      </div>
+      <div class="p-3 bg-slate-50 rounded border">
+        <span class="text-slate-500 block">Needles Spec:</span>
+        <span class="font-bold font-mono">{{ roll['needles'] }}</span>
+      </div>
+      <div class="p-3 bg-slate-50 rounded border">
+        <span class="text-slate-500 block">Knitting Machine:</span>
+        <span class="font-bold font-mono">{{ roll['machine_no'] }}</span>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

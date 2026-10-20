@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GarmentFlow Pro - Multi-Window Desktop Workspace</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    .window {
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+      transition: width 0.2s, height 0.2s, left 0.2s, top 0.2s;
+    }
+    .window.active {
+      box-shadow: 0 20px 35px -5px rgba(16, 185, 129, 0.25), 0 10px 15px -5px rgba(0, 0, 0, 0.2);
+      border-color: #10b981;
+    }
+    iframe {
+      border: none;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 h-screen w-screen overflow-hidden flex flex-col font-sans select-none">
+
+  <!-- Desktop Top Bar -->
+  <header class="h-10 bg-slate-950 border-b border-slate-800 flex items-center justify-between px-4 z-50">
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2 font-black text-xs text-white">
+        <i class="fa-solid fa-industry text-emerald-400"></i>
+        <span>GARMENTFLOW <span class="text-emerald-400 font-mono">DESKTOP OS</span></span>
+      </div>
+      <div class="h-4 w-px bg-slate-800 mx-1"></div>
+      
+      <!-- Layout Presets Dropdown -->
+      <div class="flex items-center gap-1 text-[11px]">
+        <button onclick="applyPreset('split')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded font-medium flex items-center gap-1.5 transition-colors">
+          <i class="fa-solid fa-table-columns text-emerald-400"></i> Split 50/50
+        </button>
+        <button onclick="applyPreset('three_way')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded font-medium flex items-center gap-1.5 transition-colors">
+          <i class="fa-solid fa-columns text-blue-400"></i> 3-Way Floor
+        </button>
+        <button onclick="applyPreset('grid')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded font-medium flex items-center gap-1.5 transition-colors">
+          <i class="fa-solid fa-border-all text-amber-400"></i> 2x2 Grid
+        </button>
+        <button onclick="tileAllVisible()" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded font-medium flex items-center gap-1.5 transition-colors">
+          <i class="fa-solid fa-grip text-purple-400"></i> Tile All
+        </button>
+      </div>
+    </div>
+
+    <!-- Station Info & Role -->
+    <div class="flex items-center gap-3 text-xs">
+      <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded text-[11px]">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span class="text-slate-400 font-mono">DB:</span>
+        <span id="dbIndicator" class="font-bold text-emerald-400 font-mono">Loading...</span>
+      </div>
+      <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded text-[11px]">
+        <i class="fa-solid fa-user-shield text-slate-400"></i>
+        <span class="font-bold text-white">{{ session.get('user', 'admin') }}</span>
+        <span class="px-1.5 py-0.2 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded font-mono uppercase text-[9px]">
+          {{ session.get('role', 'admin') }}
+        </span>
+      </div>
+      <div class="text-[11px] font-mono text-slate-400" id="desktopClock">00:00:00</div>
+    </div>
+  </header>
+
+  <!-- Desktop Main Workspace -->
+  <main id="workspace" class="flex-1 relative overflow-hidden bg-slate-900 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px]">
+    <!-- Windows will be dynamically mounted here -->
+  </main>
+
+  <!-- Desktop Bottom Taskbar -->
+  <footer class="h-11 bg-slate-950 border-t border-slate-800 flex items-center justify-between px-3 z-50">
+    <div class="flex items-center gap-2">
+      <!-- App Launcher / Start Button -->
+      <button onclick="toggleStartMenu()" id="startBtn" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded flex items-center gap-2 shadow-xs transition-colors">
+        <i class="fa-solid fa-cubes"></i>
+        <span>Modules</span>
+      </button>
+
+      <!-- Open Windows Dock Tabs -->
+      <div id="taskbarTabs" class="flex items-center gap-1.5 overflow-x-auto max-w-4xl py-0.5">
+        <!-- Rendered by JS -->
+      </div>
+    </div>
+
+    <!-- Quick Desktop Actions -->
+    <div class="flex items-center gap-1 text-xs">
+      <button onclick="minimizeAllWindows()" title="Minimize All" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px]">
+        <i class="fa-solid fa-window-minimize"></i>
+      </button>
+      <button onclick="restoreAllWindows()" title="Restore All" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px]">
+        <i class="fa-solid fa-window-restore"></i>
+      </button>
+      <button onclick="closeAllWindows()" title="Close All" class="px-2.5 py-1 bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 rounded text-[11px]">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+  </footer>
+
+  <!-- Start Menu / App Launcher Popup -->
+  <div id="startMenu" class="fixed bottom-12 left-3 w-80 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl p-4 z-50 hidden flex flex-col gap-3">
+    <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+      <span class="text-xs font-bold uppercase tracking-wider text-slate-400">GarmentFlow Applications</span>
+      <span class="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">RBAC Enabled</span>
+    </div>
+
+    <div class="grid grid-cols-2 gap-2 text-xs">
+      <button onclick="openWindow('roll_wise', 'Roll-Wise Tracking', '/roll-wise', 'fa-scroll')" class="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500 rounded-lg text-left flex items-center gap-2.5 transition-all">
+        <i class="fa-solid fa-scroll text-emerald-400 text-base"></i>
+        <div>
+          <div class="font-bold text-white text-[11px]">Roll-Wise</div>
+          <div class="text-[9px] text-slate-400">Live Production</div>
+        </div>
+      </button>
+
+      <button onclick="openWindow('machine_sign', 'Machine Sign-In', '/machine-sign', 'fa-microchip')" class="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500 rounded-lg text-left flex items-center gap-2.5 transition-all">
+        <i class="fa-solid fa-microchip text-blue-400 text-base"></i>
+        <div>
+          <div class="font-bold text-white text-[11px]">Machine Sign</div>
+          <div class="text-[9px] text-slate-400">Barcode Gen</div>
+        </div>
+      </button>
+
+      <button onclick="openWindow('roll_entry', 'Roll Entry System', '/roll-entry', 'fa-barcode')" class="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500 rounded-lg text-left flex items-center gap-2.5 transition-all">
+        <i class="fa-solid fa-barcode text-purple-400 text-base"></i>
+        <div>
+          <div class="font-bold text-white text-[11px]">Roll Entry</div>
+          <div class="text-[9px] text-slate-400">Scan & Balance</div>
+        </div>
+      </button>
+
+      <button onclick="openWindow('ppc_tree', 'PPC Tree Hierarchy', '/ppc', 'fa-sitemap')" class="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500 rounded-lg text-left flex items-center gap-2.5 transition-all">
+        <i class="fa-solid fa-sitemap text-amber-400 text-base"></i>
+        <div>
+          <div class="font-bold text-white text-[11px]">PPC Tree</div>
+          <div class="text-[9px] text-slate-400">WO & Plans</div>
+        </div>
+      </button>
+
+      <button onclick="openWindow('roll_quality', 'Quality Inspection', '/roll-quality', 'fa-square-check')" class="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500 rounded-lg text-left flex items-center gap-2.5 transition-all">
+        <i class="fa-solid fa-square-check text-rose-400 text-base"></i>
+        <div>
+          <div class="font-bold text-white text-[11px]">QC Inspection</div>
+          <div class="text-[9px] text-slate-400">Grade A / B</div>
+        </div>
+      </button>
+
+      <button onclick="openWindow('fabric_store', 'Fabric Store Stock', '/fabric-store', 'fa-warehouse')" class="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500 rounded-lg text-left flex items-center gap-2.5 transition-all">
+        <i class="fa-solid fa-warehouse text-cyan-400 text-base"></i>
+        <div>
+          <div class="font-bold text-white text-[11px]">Fabric Store</div>
+          <div class="text-[9px] text-slate-400">Scan Bags</div>
+        </div>
+      </button>
+
+      <button onclick="openWindow('dispatch', 'Vehicle Dispatch', '/dispatch', 'fa-truck-fast')" class="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500 rounded-lg text-left flex items-center gap-2.5 transition-all">
+        <i class="fa-solid fa-truck-fast text-emerald-400 text-base"></i>
+        <div>
+          <div class="font-bold text-white text-[11px]">Dispatch</div>
+          <div class="text-[9px] text-slate-400">Gate Pass PDF</div>
+        </div>
+      </button>
+
+      <button onclick="openWindow('hr_staff', 'Staff Directory', '/hr/staff', 'fa-users')" class="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500 rounded-lg text-left flex items-center gap-2.5 transition-all">
+        <i class="fa-solid fa-users text-indigo-400 text-base"></i>
+        <div>
+          <div class="font-bold text-white text-[11px]">HR Staff</div>
+          <div class="text-[9px] text-slate-400">Directory & Roles</div>
+        </div>
+      </button>
+
+      <button onclick="openWindow('hr_attendance', 'Daily Attendance', '/hr/attendance', 'fa-calendar-check')" class="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500 rounded-lg text-left flex items-center gap-2.5 transition-all">
+        <i class="fa-solid fa-calendar-check text-teal-400 text-base"></i>
+        <div>
+          <div class="font-bold text-white text-[11px]">Attendance</div>
+          <div class="text-[9px] text-slate-400">Mark Shifts</div>
+        </div>
+      </button>
+
+      <button onclick="openWindow('plan_status', 'Plan Status', '/plan-status', 'fa-list-check')" class="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500 rounded-lg text-left flex items-center gap-2.5 transition-all">
+        <i class="fa-solid fa-list-check text-yellow-400 text-base"></i>
+        <div>
+          <div class="font-bold text-white text-[11px]">Plan Status</div>
+          <div class="text-[9px] text-slate-400">Finalize & Excel</div>
+        </div>
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // State of Windows
+    const windows = {};
+    let topZIndex = 10;
+    let activeWindowId = null;
+
+    // Clock
+    setInterval(() => {
+      document.getElementById('desktopClock').innerText = new Date().toLocaleTimeString();
+    }, 1000);
+
+    // Fetch DB Status
+    fetch('/api/db-status')
+      .then(res => res.json())
+      .then(data => {
+        const el = document.getElementById('dbIndicator');
+        if (data.db_type === 'mysql') {
+          el.innerText = `MySQL (${data.host})`;
+          el.className = 'font-bold text-blue-400 font-mono';
+        } else {
+          el.innerText = 'SQLite (database.db)';
+          el.className = 'font-bold text-emerald-400 font-mono';
+        }
+      })
+      .catch(() => {
+        document.getElementById('dbIndicator').innerText = 'SQLite';
+      });
+
+    function toggleStartMenu() {
+      document.getElementById('startMenu').classList.toggle('hidden');
+    }
+
+    // Close Start Menu when clicking outside
+    document.addEventListener('click', (e) => {
+      const menu = document.getElementById('startMenu');
+      const btn = document.getElementById('startBtn');
+      if (!menu.contains(e.target) && !btn.contains(e.target)) {
+        menu.classList.add('hidden');
+      }
+    });
+
+    function openWindow(id, title, url, icon = 'fa-window-maximize') {
+      document.getElementById('startMenu').classList.add('hidden');
+
+      if (windows[id]) {
+        // If window is minimized or hidden, restore & focus
+        windows[id].minimized = false;
+        const winEl = document.getElementById(`win_${id}`);
+        winEl.style.display = 'flex';
+        focusWindow(id);
+        renderTaskbar();
+        return;
+      }
+
+      // Default positioning with staggered cascade
+      const count = Object.keys(windows).length;
+      const left = 40 + (count % 6) * 35;
+      const top = 30 + (count % 6) * 30;
+      const width = Math.min(window.innerWidth - 80, 880);
+      const height = Math.min(window.innerHeight - 140, 560);
+
+      windows[id] = {
+        id,
+        title,
+        url,
+        icon,
+        left,
+        top,
+        width,
+        height,
+        minimized: false,
+        maximized: false,
+        prevLeft: left,
+        prevTop: top,
+        prevWidth: width,
+        prevHeight: height
+      };
+
+      createWindowDOM(windows[id]);
+      focusWindow(id);
+      renderTaskbar();
+    }
+
+    function createWindowDOM(win) {
+      const workspace = document.getElementById('workspace');
+      const el = document.createElement('div');
+      el.id = `win_${win.id}`;
+      el.className = 'window absolute bg-slate-900 border border-slate-700 rounded-lg flex flex-col overflow-hidden select-none active';
+      el.style.left = `${win.left}px`;
+      el.style.top = `${win.top}px`;
+      el.style.width = `${win.width}px`;
+      el.style.height = `${win.height}px`;
+      el.style.zIndex = ++topZIndex;
+
+      el.innerHTML = `
+        <!-- Window Title Bar -->
+        <div class="h-9 bg-slate-800 border-b border-slate-700 px-3 flex items-center justify-between cursor-move" onmousedown="startDrag('${win.id}', event)">
+          <div class="flex items-center gap-2 text-xs font-bold text-slate-200">
+            <i class="fa-solid ${win.icon} text-emerald-400"></i>
+            <span>${win.title}</span>
+          </div>
+          <div class="flex items-center gap-1.5" onmousedown="event.stopPropagation()">
+            <button onclick="refreshWindow('${win.id}')" title="Refresh" class="w-6 h-6 rounded hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-xs">
+              <i class="fa-solid fa-rotate-right text-[10px]"></i>
+            </button>
+            <button onclick="minimizeWindow('${win.id}')" title="Minimize" class="w-6 h-6 rounded hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-xs">
+              <i class="fa-solid fa-window-minimize text-[9px] -mt-1"></i>
+            </button>
+            <button onclick="toggleMaximizeWindow('${win.id}')" title="Maximize/Restore" class="w-6 h-6 rounded hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-xs">
+              <i class="fa-regular fa-square text-[10px]"></i>
+            </button>
+            <button onclick="closeWindow('${win.id}')" title="Close" class="w-6 h-6 rounded hover:bg-rose-900 hover:text-rose-200 text-slate-400 flex items-center justify-center text-xs">
+              <i class="fa-solid fa-xmark text-xs"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Window Iframe Content -->
+        <div class="flex-1 bg-white relative">
+          <iframe id="frame_${win.id}" src="${win.url}" class="w-full h-full"></iframe>
+        </div>
+      `;
+
+      el.addEventListener('mousedown', () => focusWindow(win.id));
+      workspace.appendChild(el);
+    }
+
+    function focusWindow(id) {
+      activeWindowId = id;
+      document.querySelectorAll('.window').forEach(w => w.classList.remove('active'));
+      const winEl = document.getElementById(`win_${id}`);
+      if (winEl) {
+        winEl.style.zIndex = ++topZIndex;
+        winEl.classList.add('active');
+      }
+      renderTaskbar();
+    }
+
+    function minimizeWindow(id) {
+      if (!windows[id]) return;
+      windows[id].minimized = true;
+      const el = document.getElementById(`win_${id}`);
+      if (el) el.style.display = 'none';
+      renderTaskbar();
+    }
+
+    function toggleMaximizeWindow(id) {
+      const win = windows[id];
+      const el = document.getElementById(`win_${id}`);
+      if (!win || !el) return;
+
+      const ws = document.getElementById('workspace');
+      if (!win.maximized) {
+        win.prevLeft = el.offsetLeft;
+        win.prevTop = el.offsetTop;
+        win.prevWidth = el.offsetWidth;
+        win.prevHeight = el.offsetHeight;
+
+        el.style.left = '0px';
+        el.style.top = '0px';
+        el.style.width = `${ws.clientWidth}px`;
+        el.style.height = `${ws.clientHeight}px`;
+        win.maximized = true;
+      } else {
+        el.style.left = `${win.prevLeft}px`;
+        el.style.top = `${win.prevTop}px`;
+        el.style.width = `${win.prevWidth}px`;
+        el.style.height = `${win.prevHeight}px`;
+        win.maximized = false;
+      }
+      focusWindow(id);
+    }
+
+    function closeWindow(id) {
+      const el = document.getElementById(`win_${id}`);
+      if (el) el.remove();
+      delete windows[id];
+      renderTaskbar();
+    }
+
+    function refreshWindow(id) {
+      const frame = document.getElementById(`frame_${id}`);
+      if (frame) frame.src = frame.src;
+    }
+
+    function renderTaskbar() {
+      const container = document.getElementById('taskbarTabs');
+      container.innerHTML = '';
+
+      Object.values(windows).forEach(win => {
+        const btn = document.createElement('button');
+        const isActive = activeWindowId === win.id && !win.minimized;
+        btn.className = `px-3 py-1 rounded text-xs flex items-center gap-1.5 font-medium transition-all ${
+          isActive 
+            ? 'bg-slate-800 text-emerald-400 border border-emerald-500/50 shadow-inner' 
+            : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+        }`;
+        btn.innerHTML = `<i class="fa-solid ${win.icon} text-[10px]"></i> <span>${win.title}</span>`;
+        btn.onclick = () => {
+          if (win.minimized) {
+            win.minimized = false;
+            document.getElementById(`win_${win.id}`).style.display = 'flex';
+            focusWindow(win.id);
+          } else if (activeWindowId === win.id) {
+            minimizeWindow(win.id);
+          } else {
+            focusWindow(win.id);
+          }
+        };
+        container.appendChild(btn);
+      });
+    }
+
+    // Dragging Logic
+    let currentDrag = null;
+    function startDrag(id, e) {
+      const el = document.getElementById(`win_${id}`);
+      if (!el || windows[id]?.maximized) return;
+
+      currentDrag = {
+        id,
+        el,
+        startX: e.clientX,
+        startY: e.clientY,
+        origX: el.offsetLeft,
+        origY: el.offsetTop
+      };
+      focusWindow(id);
+    }
+
+    window.addEventListener('mousemove', (e) => {
+      if (!currentDrag) return;
+      const dx = e.clientX - currentDrag.startX;
+      const dy = e.clientY - currentDrag.startY;
+      currentDrag.el.style.left = `${Math.max(0, currentDrag.origX + dx)}px`;
+      currentDrag.el.style.top = `${Math.max(0, currentDrag.origY + dy)}px`;
+    });
+
+    window.addEventListener('mouseup', () => {
+      currentDrag = null;
+    });
+
+    // Window Presets
+    function applyPreset(preset) {
+      const ws = document.getElementById('workspace');
+      const w = ws.clientWidth;
+      const h = ws.clientHeight;
+
+      if (preset === 'split') {
+        openWindow('roll_wise', 'Roll-Wise Tracking', '/roll-wise', 'fa-scroll');
+        openWindow('machine_sign', 'Machine Sign-In', '/machine-sign', 'fa-microchip');
+
+        const el1 = document.getElementById('win_roll_wise');
+        const el2 = document.getElementById('win_machine_sign');
+
+        if (el1) {
+          el1.style.left = '0px'; el1.style.top = '0px';
+          el1.style.width = `${Math.floor(w / 2)}px`; el1.style.height = `${h}px`;
+        }
+        if (el2) {
+          el2.style.left = `${Math.floor(w / 2)}px`; el2.style.top = '0px';
+          el2.style.width = `${Math.ceil(w / 2)}px`; el2.style.height = `${h}px`;
+        }
+      } else if (preset === 'three_way') {
+        openWindow('machine_sign', 'Machine Sign', '/machine-sign', 'fa-microchip');
+        openWindow('roll_entry', 'Roll Entry', '/roll-entry', 'fa-barcode');
+        openWindow('roll_wise', 'Roll-Wise', '/roll-wise', 'fa-scroll');
+
+        const colW = Math.floor(w / 3);
+        const w1 = document.getElementById('win_machine_sign');
+        const w2 = document.getElementById('win_roll_entry');
+        const w3 = document.getElementById('win_roll_wise');
+
+        if (w1) { w1.style.left = '0px'; w1.style.top = '0px'; w1.style.width = `${colW}px`; w1.style.height = `${h}px`; }
+        if (w2) { w2.style.left = `${colW}px`; w2.style.top = '0px'; w2.style.width = `${colW}px`; w2.style.height = `${h}px`; }
+        if (w3) { w3.style.left = `${colW * 2}px`; w3.style.top = '0px'; w3.style.width = `${w - colW * 2}px`; w3.style.height = `${h}px`; }
+      } else if (preset === 'grid') {
+        openWindow('ppc_tree', 'PPC Tree', '/ppc', 'fa-sitemap');
+        openWindow('roll_entry', 'Roll Entry', '/roll-entry', 'fa-barcode');
+        openWindow('roll_quality', 'Quality Inspection', '/roll-quality', 'fa-square-check');
+        openWindow('dispatch', 'Dispatch', '/dispatch', 'fa-truck-fast');
+
+        const hw = Math.floor(w / 2);
+        const hh = Math.floor(h / 2);
+
+        const list = ['ppc_tree', 'roll_entry', 'roll_quality', 'dispatch'];
+        const coords = [
+          { l: 0, t: 0 }, { l: hw, t: 0 },
+          { l: 0, t: hh }, { l: hw, t: hh }
+        ];
+
+        list.forEach((id, idx) => {
+          const el = document.getElementById(`win_${id}`);
+          if (el) {
+            el.style.left = `${coords[idx].l}px`;
+            el.style.top = `${coords[idx].t}px`;
+            el.style.width = `${hw}px`;
+            el.style.height = `${hh}px`;
+          }
+        });
+      }
+    }
+
+    function tileAllVisible() {
+      const activeWins = Object.values(windows).filter(w => !w.minimized);
+      if (activeWins.length === 0) return;
+
+      const ws = document.getElementById('workspace');
+      const w = ws.clientWidth;
+      const h = ws.clientHeight;
+
+      const cols = Math.ceil(Math.sqrt(activeWins.length));
+      const rows = Math.ceil(activeWins.length / cols);
+      const winW = Math.floor(w / cols);
+      const winH = Math.floor(h / rows);
+
+      activeWins.forEach((win, idx) => {
+        const c = idx % cols;
+        const r = Math.floor(idx / cols);
+        const el = document.getElementById(`win_${win.id}`);
+        if (el) {
+          el.style.left = `${c * winW}px`;
+          el.style.top = `${r * winH}px`;
+          el.style.width = `${winW}px`;
+          el.style.height = `${winH}px`;
+        }
+      });
+    }
+
+    function minimizeAllWindows() {
+      Object.keys(windows).forEach(minimizeWindow);
+    }
+
+    function restoreAllWindows() {
+      Object.keys(windows).forEach(id => {
+        windows[id].minimized = false;
+        const el = document.getElementById(`win_${id}`);
+        if (el) el.style.display = 'flex';
+      });
+      renderTaskbar();
+    }
+
+    function closeAllWindows() {
+      Object.keys(windows).forEach(closeWindow);
+    }
+
+    // Auto-open Split 50/50 on launch as requested
+    window.addEventListener('DOMContentLoaded', () => {
+      applyPreset('split');
+    });
+  </script>
+</body>
+</html>

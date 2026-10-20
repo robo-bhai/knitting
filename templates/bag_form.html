@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}{% if bag %}Edit Bag{% else %}New Bag{% endif %} | TexFlow ERP{% endblock %}
+
+{% block content %}
+<div class="max-w-md mx-auto bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+  <h1 class="text-base font-bold text-slate-900 mb-4 pb-2 border-b">
+    {% if bag %}Edit Bag {{ bag['bag_number'] }}{% else %}Add New Bag to Plan{% endif %}
+  </h1>
+
+  <form method="POST" class="space-y-4">
+    <div>
+      <label class="block text-xs font-semibold text-slate-700 mb-1">Bag Number *</label>
+      <input type="text" name="bag_number" value="{{ bag['bag_number'] if bag else '' }}" required placeholder="e.g. BAG-8801-01"
+        class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase">
+    </div>
+
+    <div>
+      <label class="block text-xs font-semibold text-slate-700 mb-1">Fabric Shade / Color *</label>
+      <input type="text" name="shade" value="{{ bag['shade'] if bag else '' }}" required placeholder="e.g. Navy Blue"
+        class="w-full px-3 py-2 border rounded-lg text-xs">
+    </div>
+
+    <div class="flex justify-end gap-2 pt-2">
+      <a href="{{ url_for('ppc') }}" class="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded">Cancel</a>
+      <button type="submit" class="px-4 py-1.5 bg-slate-900 text-white rounded text-xs font-semibold">
+        Save Bag
+      </button>
+    </div>
+  </form>
+</div>
+{% endblock %}

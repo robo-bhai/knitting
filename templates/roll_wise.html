@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+
+{% block title %}Roll-Wise Production Tracking - TexFlow ERP{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <!-- Header & Filter Bar -->
+  <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 pb-4 border-b border-slate-100">
+      <div>
+        <h1 class="text-xl font-bold text-slate-900 flex items-center gap-2">
+          <i class="fa-solid fa-scroll text-emerald-600"></i>
+          Roll-Wise Production Tracking
+        </h1>
+        <p class="text-xs text-slate-500 mt-1">Track roll history, weights, machine bindings, and bag lock statuses</p>
+      </div>
+
+      <!-- Quick Stats Card -->
+      <div class="flex items-center gap-3">
+        <div class="px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-center">
+          <span class="block text-[10px] uppercase font-bold text-emerald-700">Planned (KG)</span>
+          <span class="text-base font-black text-emerald-800">{{ stats.planned|round(2) if stats else 0 }}</span>
+        </div>
+        <div class="px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg text-center">
+          <span class="block text-[10px] uppercase font-bold text-blue-700">Produced (KG)</span>
+          <span class="text-base font-black text-blue-800">{{ stats.produced|round(2) if stats else 0 }}</span>
+        </div>
+        <div class="px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-center">
+          <span class="block text-[10px] uppercase font-bold text-amber-700">Balance (KG)</span>
+          <span class="text-base font-black text-amber-800">{{ stats.balance|round(2) if stats else 0 }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filters Form -->
+    <form method="GET" action="{{ url_for('roll_wise') }}" class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 mb-1">Work Order</label>
+        <select name="work_order" id="wo_select" class="w-full text-xs border border-slate-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-emerald-500" required onchange="fetchShades(this.value)">
+          <option value="">-- Select Work Order --</option>
+          {% for w in work_orders %}
+            <option value="{{ w.work_order }}" {% if w.work_order == selected_wo %}selected{% endif %}>{{ w.work_order }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 mb-1">Shade</label>
+        <select name="shade" id="shade_select" class="w-full text-xs border border-slate-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-emerald-500" required onchange="fetchJobs(this.value)">
+          <option value="">-- Select Shade --</option>
+          {% if selected_shade %}
+            <option value="{{ selected_shade }}" selected>{{ selected_shade }}</option>
+          {% endif %}
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 mb-1">Job / Needles</label>
+        <select name="job" id="job_select" class="w-full text-xs border border-slate-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-emerald-500" required>
+          <option value="">-- Select Job --</option>
+          {% if selected_job %}
+            <option value="{{ selected_job }}" selected>{{ selected_job }}</option>
+          {% endif %}
+        </select>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button type="submit" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs py-2 px-4 rounded-lg flex items-center justify-center gap-1.5 transition-all">
+          <i class="fa-solid fa-filter"></i> Apply Filter
+        </button>
+        <a href="{{ url_for('roll_wise') }}" class="p-2 border border-slate-300 hover:bg-slate-100 rounded-lg text-slate-600" title="Reset Filters">
+          <i class="fa-solid fa-rotate-left"></i>
+        </a>
+      </div>
+    </form>
+  </div>
+
+  <!-- Rolls Table -->
+  <div class="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+    <div class="px-5 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+      <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700">Production Records ({{ results|length }} Rolls)</h2>
+      <span class="text-[11px] text-slate-500 font-mono">Active Target Job: {{ selected_job or 'None' }}</span>
+    </div>
+
+    {% if results %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs text-slate-700">
+        <thead class="bg-slate-100 text-[11px] uppercase font-bold text-slate-600 border-b border-slate-200">
+          <tr>
+            <th class="py-2.5 px-3">Roll #</th>
+            <th class="py-2.5 px-3">Barcode</th>
+            <th class="py-2.5 px-3">Lot Name</th>
+            <th class="py-2.5 px-3">Bag #</th>
+            <th class="py-2.5 px-3">Needles</th>
+            <th class="py-2.5 px-3">Prod Weight (KG)</th>
+            <th class="py-2.5 px-3">Grade-A (QC)</th>
+            <th class="py-2.5 px-3">Machine</th>
+            <th class="py-2.5 px-3">Bag Status</th>
+            <th class="py-2.5 px-3">Timestamp</th>
+            <th class="py-2.5 px-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 font-mono">
+          {% for r in results %}
+          <tr class="hover:bg-slate-50/80 transition-colors">
+            <td class="py-2.5 px-3 font-bold text-emerald-700">#{{ r.roll_no }}</td>
+            <td class="py-2.5 px-3 font-semibold">{{ r.roll_barcode or 'N/A' }}</td>
+            <td class="py-2.5 px-3 font-sans">{{ r.lot_name }}</td>
+            <td class="py-2.5 px-3"><span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 text-[10px]">{{ r.bag_number }}</span></td>
+            <td class="py-2.5 px-3">{{ r.needles }}</td>
+            <td class="py-2.5 px-3 font-bold text-slate-900">{{ r.weight }}</td>
+            <td class="py-2.5 px-3">
+              {% if r.qw and r.qw > 0 %}
+                <span class="text-emerald-700 font-bold">{{ r.qw }}</span>
+              {% else %}
+                <span class="text-amber-600 font-sans italic text-[10px]">Pending QC</span>
+              {% endif %}
+            </td>
+            <td class="py-2.5 px-3 font-sans text-slate-600">{{ r.machine_no or '-' }}</td>
+            <td class="py-2.5 px-3">
+              {% if r.bag_status in ['Finalized', 'Dispatched'] %}
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-rose-100 text-rose-800 border border-rose-200">
+                  <i class="fa-solid fa-lock text-[9px] mr-1"></i> {{ r.bag_status }}
+                </span>
+              {% else %}
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  Open
+                </span>
+              {% endif %}
+            </td>
+            <td class="py-2.5 px-3 text-slate-400 font-sans text-[11px]">{{ r.created_at }}</td>
+            <td class="py-2.5 px-3 text-right font-sans">
+              {% if r.bag_status not in ['Finalized', 'Dispatched'] %}
+                <button onclick="openEditRoll('{{ r.id }}', '{{ r.weight }}', '{{ r.roll_no }}')" class="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded text-[11px] mr-1">
+                  <i class="fa-solid fa-pen-to-square"></i>
+                </button>
+                <a href="{{ url_for('delete_roll', roll_id=r.id) }}" onclick="return confirm('Delete Roll #{{ r.roll_no }}? This will restore weight to the Lot.')" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded text-[11px]">
+                  <i class="fa-solid fa-trash"></i>
+                </a>
+              {% else %}
+                <span class="text-slate-400 text-[10px] italic">Locked</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="p-12 text-center text-slate-400">
+      <i class="fa-solid fa-scroll text-3xl mb-2 text-slate-300"></i>
+      <p class="text-sm font-medium">Select a Work Order, Shade, and Job above to load roll production records.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Edit Roll Modal -->
+<div id="editRollModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 hidden">
+  <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-5 border border-slate-200">
+    <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
+      <h3 class="font-bold text-slate-900 text-sm">Edit Roll Production Weight</h3>
+      <button onclick="closeEditRoll()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <form id="editRollForm" method="POST">
+      <div class="mb-4">
+        <label class="block text-xs font-semibold text-slate-700 mb-1">New Weight (KG)</label>
+        <input type="number" step="0.01" name="weight" id="new_roll_weight" class="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-emerald-500 font-mono" required>
+        <p class="text-[11px] text-slate-500 mt-1">Lot balance will be automatically adjusted by the difference.</p>
+      </div>
+      <div class="flex justify-end gap-2">
+        <button type="button" onclick="closeEditRoll()" class="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
+        <button type="submit" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold">Save Weight</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function fetchShades(wo) {
+  if (!wo) return;
+  fetch(`/api/shades-by-wo/${encodeURIComponent(wo)}`)
+    .then(res => res.json())
+    .then(data => {
+      const shadeSelect = document.getElementById('shade_select');
+      shadeSelect.innerHTML = '<option value="">-- Select Shade --</option>';
+      data.forEach(s => {
+        shadeSelect.innerHTML += `<option value="${s}">${s}</option>`;
+      });
+      document.getElementById('job_select').innerHTML = '<option value="">-- Select Job --</option>';
+    });
+}
+
+function fetchJobs(shade) {
+  const wo = document.getElementById('wo_select').value;
+  if (!wo || !shade) return;
+  fetch(`/api/jobs-by-shade/${encodeURIComponent(wo)}/${encodeURIComponent(shade)}`)
+    .then(res => res.json())
+    .then(data => {
+      const jobSelect = document.getElementById('job_select');
+      jobSelect.innerHTML = '<option value="">-- Select Job --</option>';
+      data.forEach(j => {
+        jobSelect.innerHTML += `<option value="${j.job}">Job #${j.job} (${j.needles_ref})</option>`;
+      });
+    });
+}
+
+function openEditRoll(rollId, currentWeight, rollNo) {
+  document.getElementById('editRollForm').action = `/api/edit-roll/${rollId}`;
+  document.getElementById('new_roll_weight').value = currentWeight;
+  document.getElementById('editRollModal').classList.remove('hidden');
+}
+
+function closeEditRoll() {
+  document.getElementById('editRollModal').classList.add('hidden');
+}
+</script>
+{% endblock %}

@@ -1,0 +1,6 @@
+{
+  "name": "TexFlow Industrial Garment ERP",
+  "description": "Production-ready industrial textile & garment management system covering PPC tree hierarchy, machine sign-in, roll barcode tracking, quality inspection, store inventory, dispatch gate passes, and HR payroll.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

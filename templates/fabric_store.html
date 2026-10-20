@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Fabric Store Stock | TexFlow ERP{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+    <h1 class="text-lg font-bold text-slate-900">Fabric Store Stock Intake (/fabric-store)</h1>
+    <p class="text-xs text-slate-500 mt-1">Scan bag barcode and receive quality-cleared fabric rolls into warehouse inventory.</p>
+  </div>
+
+  <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+    <form id="scan_bag_form" class="flex items-end gap-3 max-w-lg">
+      <div class="flex-1">
+        <label class="block text-xs font-semibold text-slate-700 mb-1">Scan Bag Barcode</label>
+        <input type="text" id="bag_number" required placeholder="e.g. BAG-8801-01" class="w-full px-3 py-2 border rounded-lg text-xs font-mono font-bold uppercase">
+      </div>
+      <button type="submit" class="px-5 py-2 bg-slate-900 text-white rounded-lg text-xs font-semibold">
+        Scan Bag
+      </button>
+    </form>
+  </div>
+
+  <div id="rolls_box" class="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden hidden">
+    <div class="p-4 border-b flex justify-between items-center bg-slate-50">
+      <span class="font-bold text-xs">Quality-Cleared Rolls Ready for Store</span>
+      <button id="save_stock_btn" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold uppercase">
+        Confirm & Save Stock
+      </button>
+    </div>
+    <div id="rolls_table_container" class="overflow-x-auto"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let scannedRolls = [];
+
+  document.getElementById('scan_bag_form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const bagNo = document.getElementById('bag_number').value;
+
+    const fd = new FormData();
+    fd.append('bag_number', bagNo);
+
+    const res = await fetch('/fabric-store/scan-bag', { method: 'POST', body: fd });
+    const data = await res.json();
+
+    if (!data.success) {
+      alert(data.message);
+      document.getElementById('rolls_box').classList.add('hidden');
+    } else {
+      scannedRolls = data.rolls;
+      renderRolls(data.rolls);
+      document.getElementById('rolls_box').classList.remove('hidden');
+    }
+  });
+
+  function renderRolls(rolls) {
+    let html = '<table class="w-full text-left text-xs"><thead class="bg-slate-100 uppercase text-[10px] border-b"><tr><th class="p-2"><input type="checkbox" id="check_all" checked></th><th class="p-2">Roll #</th><th class="p-2">Barcode</th><th class="p-2">Needles</th><th class="p-2">Shade</th><th class="p-2 text-right">A-Grade Weight</th></tr></thead><tbody class="divide-y">';
+    rolls.forEach(r => {
+      html += \`<tr><td class="p-2"><input type="checkbox" class="roll_check" value="\${r.roll_barcode}" checked></td><td class="p-2 font-mono font-bold">#\${r.roll_no}</td><td class="p-2 font-mono">\${r.roll_barcode}</td><td class="p-2 font-mono">\${r.needles}</td><td class="p-2">\${r.shade}</td><td class="p-2 font-mono font-bold text-right text-emerald-800">\${r.qw.toFixed(2)} KG</td></tr>\`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('rolls_table_container').innerHTML = html;
+
+    document.getElementById('check_all').addEventListener('change', function() {
+      document.querySelectorAll('.roll_check').forEach(c => c.checked = this.checked);
+    });
+  }
+
+  document.getElementById('save_stock_btn').addEventListener('click', async function() {
+    const selected = Array.from(document.querySelectorAll('.roll_check:checked')).map(c => c.value);
+    if (selected.length === 0) {
+      alert('Please select at least one roll.');
+      return;
+    }
+
+    const res = await fetch('/fabric-store/save-stock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rolls: selected })
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert('Rolls received into Fabric Store successfully!');
+      window.location.reload();
+    } else {
+      alert('Error: ' + data.message);
+    }
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Roll Entry Station | TexFlow ERP{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+    <h1 class="text-lg font-bold text-slate-900">Knitting Roll Entry Station (/roll-entry)</h1>
+    <p class="text-xs text-slate-500 mt-1">Select PPC parameters, validate machine barcodes, and record roll weight with automatic lot balance deduction.</p>
+  </div>
+
+  <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 mb-1">1. Work Order</label>
+        <select id="wo_select" class="w-full px-3 py-2 border rounded-lg text-xs font-mono bg-white">
+          <option value="">-- Choose Work Order --</option>
+          {% for wo in work_orders %}
+            <option value="{{ wo }}">{{ wo }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 mb-1">2. Production Plan</label>
+        <select id="plan_select" disabled class="w-full px-3 py-2 border rounded-lg text-xs font-mono bg-white disabled:bg-slate-100">
+          <option value="">-- Choose Plan --</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 mb-1">3. Bag (Shade)</label>
+        <select id="bag_select" disabled class="w-full px-3 py-2 border rounded-lg text-xs font-mono bg-white disabled:bg-slate-100">
+          <option value="">-- Choose Bag --</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Lots Container -->
+    <div id="lots_container" class="mt-6 pt-4 border-t border-slate-100 hidden">
+      <h3 class="text-xs font-bold uppercase text-slate-800 mb-2">Select Target Lot for this Roll:</h3>
+      <div id="lots_grid" class="grid grid-cols-1 sm:grid-cols-3 gap-3"></div>
+    </div>
+  </div>
+
+  <!-- Roll Entry Form -->
+  <div id="roll_form_card" class="bg-white rounded-xl border border-slate-200 p-5 shadow-xs hidden">
+    <h2 class="font-bold text-sm text-slate-900 mb-4 pb-2 border-b border-slate-100">Record Fabric Roll Weight</h2>
+    <div id="error_box" class="p-3 mb-3 bg-rose-50 border border-rose-300 rounded text-xs text-rose-800 hidden"></div>
+
+    <form id="save_roll_form" class="space-y-4">
+      <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Machine Barcode (5-Digit) *</label>
+          <input type="text" id="machine_barcode" required placeholder="Scan barcode..." class="w-full px-3 py-2 border rounded-lg text-xs font-mono font-bold uppercase">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Needles Spec</label>
+          <input type="text" id="needles_input" readonly class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase bg-slate-50">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Roll Weight (KG) *</label>
+          <input type="number" step="0.01" id="weight_input" required placeholder="22.50" class="w-full px-3 py-2 border rounded-lg text-xs font-mono font-bold text-slate-900">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Tube No</label>
+          <input type="text" id="tube_input" value="T-101" class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase">
+        </div>
+      </div>
+
+      <div class="flex justify-end pt-2">
+        <button type="submit" class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold uppercase tracking-wider">
+          Save Roll & Generate Barcode
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let currentWo = '', currentPlan = '', currentBag = '', currentLot = '', currentNeedles = '';
+
+  const woSelect = document.getElementById('wo_select');
+  const planSelect = document.getElementById('plan_select');
+  const bagSelect = document.getElementById('bag_select');
+  const lotsContainer = document.getElementById('lots_container');
+  const lotsGrid = document.getElementById('lots_grid');
+  const rollFormCard = document.getElementById('roll_form_card');
+
+  woSelect.addEventListener('change', async function() {
+    currentWo = this.value;
+    planSelect.innerHTML = '<option value="">-- Choose Plan --</option>';
+    bagSelect.innerHTML = '<option value="">-- Choose Bag --</option>';
+    lotsContainer.classList.add('hidden');
+    rollFormCard.classList.add('hidden');
+    if (!currentWo) return;
+
+    const res = await fetch('/api/plans/' + encodeURIComponent(currentWo));
+    const plans = await res.json();
+    plans.forEach(p => planSelect.innerHTML += \`<option value="\${p}">\${p}</option>\`);
+    planSelect.disabled = false;
+  });
+
+  planSelect.addEventListener('change', async function() {
+    currentPlan = this.value;
+    bagSelect.innerHTML = '<option value="">-- Choose Bag --</option>';
+    lotsContainer.classList.add('hidden');
+    rollFormCard.classList.add('hidden');
+    if (!currentPlan) return;
+
+    const res = await fetch('/api/bags/' + encodeURIComponent(currentPlan));
+    const bags = await res.json();
+    bags.forEach(b => bagSelect.innerHTML += \`<option value="\${b}">\${b}</option>\`);
+    bagSelect.disabled = false;
+  });
+
+  bagSelect.addEventListener('change', async function() {
+    currentBag = this.value;
+    if (!currentBag) return;
+
+    const res = await fetch('/api/lots/' + encodeURIComponent(currentBag));
+    const lots = await res.json();
+    lotsGrid.innerHTML = '';
+    lots.forEach(lot => {
+      const card = document.createElement('div');
+      card.className = 'p-3 rounded-lg border border-slate-200 hover:border-emerald-500 cursor-pointer bg-slate-50 hover:bg-white';
+      card.innerHTML = \`<div class="flex justify-between font-bold text-xs"><span>\${lot.lot_name}</span><span>\${lot.needles}</span></div><div class="mt-2 text-xs font-mono">Bal: <strong>\${lot.rem_weight.toFixed(1)} KG</strong></div>\`;
+      card.onclick = () => {
+        currentLot = lot.lot_name;
+        currentNeedles = lot.needles;
+        document.getElementById('needles_input').value = lot.needles;
+        if (lot.barcode) document.getElementById('machine_barcode').value = lot.barcode;
+        rollFormCard.classList.remove('hidden');
+      };
+      lotsGrid.appendChild(card);
+    });
+    lotsContainer.classList.remove('hidden');
+  });
+
+  document.getElementById('save_roll_form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const barcode = document.getElementById('machine_barcode').value;
+    const weight = document.getElementById('weight_input').value;
+    const tube = document.getElementById('tube_input').value;
+
+    const payload = {
+      work_order: currentWo,
+      plan_id: currentPlan,
+      bag_number: currentBag,
+      lot_name: currentLot,
+      needles: currentNeedles,
+      weight: parseFloat(weight),
+      barcode: barcode,
+      tube_no: tube
+    };
+
+    const res = await fetch('/api/save-roll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!data.success) {
+      document.getElementById('error_box').innerText = data.message;
+      document.getElementById('error_box').classList.remove('hidden');
+    } else {
+      alert(\`Roll Saved Successfully! Generated Barcode: \${data.sticker_data.roll_barcode}\`);
+      window.location.reload();
+    }
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block title %}HR Staff Directory - TexFlow ERP{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <!-- Header & Add Button -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div>
+      <h1 class="text-xl font-bold text-slate-900 flex items-center gap-2">
+        <i class="fa-solid fa-users text-emerald-600"></i>
+        Staff & Workforce Directory
+      </h1>
+      <p class="text-xs text-slate-500 mt-1">Manage personnel records, departments, roles, and compensation</p>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <a href="{{ url_for('hr_attendance') }}" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs rounded-lg transition-colors flex items-center gap-1.5">
+        <i class="fa-solid fa-calendar-check text-emerald-600"></i> Daily Attendance
+      </a>
+      <a href="{{ url_for('hr_payroll') }}" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs rounded-lg transition-colors flex items-center gap-1.5">
+        <i class="fa-solid fa-receipt text-blue-600"></i> Payroll Report
+      </a>
+      <button onclick="toggleAddStaffModal()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 shadow-xs">
+        <i class="fa-solid fa-user-plus"></i> Add New Staff
+      </button>
+    </div>
+  </div>
+
+  <!-- Staff Table -->
+  <div class="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+    <div class="px-5 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-bold uppercase tracking-wider text-slate-700">Registered Personnel ({{ staff|length }})</span>
+      </div>
+      <div class="w-64">
+        <input type="text" id="staffSearch" onkeyup="filterStaffTable()" placeholder="Quick filter by name/code..." class="w-full text-xs px-3 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500">
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs text-slate-700" id="staffTable">
+        <thead class="bg-slate-100 text-[11px] uppercase font-bold text-slate-600 border-b border-slate-200">
+          <tr>
+            <th class="py-2.5 px-3">Emp Code</th>
+            <th class="py-2.5 px-3">Full Name</th>
+            <th class="py-2.5 px-3">CNIC</th>
+            <th class="py-2.5 px-3">Phone</th>
+            <th class="py-2.5 px-3">Department</th>
+            <th class="py-2.5 px-3">Sub-Role</th>
+            <th class="py-2.5 px-3">Salary (PKR)</th>
+            <th class="py-2.5 px-3">Status</th>
+            <th class="py-2.5 px-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          {% for s in staff %}
+          <tr class="hover:bg-slate-50 transition-colors">
+            <td class="py-2.5 px-3 font-mono font-bold text-emerald-700">{{ s.emp_code }}</td>
+            <td class="py-2.5 px-3 font-semibold text-slate-900">{{ s.name }}</td>
+            <td class="py-2.5 px-3 font-mono text-slate-600">{{ s.cnic }}</td>
+            <td class="py-2.5 px-3 font-mono text-slate-600">{{ s.phone or '-' }}</td>
+            <td class="py-2.5 px-3">
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase 
+                {% if s.department == 'PPC' %}bg-purple-100 text-purple-800 border border-purple-200
+                {% elif s.department == 'Lot Making' %}bg-blue-100 text-blue-800 border border-blue-200
+                {% else %}bg-amber-100 text-amber-800 border border-amber-200{% endif %}">
+                {{ s.department }}
+              </span>
+            </td>
+            <td class="py-2.5 px-3 font-medium text-slate-700">{{ s.sub_role }}</td>
+            <td class="py-2.5 px-3 font-mono font-bold text-slate-900">Rs. {{ "{:,.0f}".format(s.salary) if s.salary else 0 }}</td>
+            <td class="py-2.5 px-3">
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 border border-emerald-200">
+                {{ s.status or 'Active' }}
+              </span>
+            </td>
+            <td class="py-2.5 px-3 text-right">
+              <a href="{{ url_for('hr_profile', staff_id=s.id) }}" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-medium mr-1" title="Edit Profile">
+                <i class="fa-solid fa-user-pen"></i> Edit
+              </a>
+              <a href="{{ url_for('hr_ledger', staff_id=s.id) }}" class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded text-[11px] font-medium" title="Financial Ledger">
+                <i class="fa-solid fa-wallet"></i> Ledger
+              </a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Add Staff Modal -->
+<div id="addStaffModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 hidden">
+  <div class="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 border border-slate-200">
+    <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
+      <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2">
+        <i class="fa-solid fa-user-plus text-emerald-600"></i> Register New Staff Member
+      </h3>
+      <button onclick="toggleAddStaffModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    
+    <form method="POST" action="{{ url_for('hr_staff_directory') }}" class="space-y-3">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Employee Code *</label>
+          <input type="text" name="emp_code" placeholder="e.g. RB-105" required class="w-full text-xs border border-slate-300 rounded-lg px-3 py-2 font-mono uppercase focus:ring-2 focus:ring-emerald-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Full Name *</label>
+          <input type="text" name="name" placeholder="Staff Name" required class="w-full text-xs border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-emerald-500">
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">CNIC Number *</label>
+          <input type="text" name="cnic" placeholder="42101-1234567-1" required class="w-full text-xs border border-slate-300 rounded-lg px-3 py-2 font-mono focus:ring-2 focus:ring-emerald-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Phone Number</label>
+          <input type="text" name="phone" placeholder="0300-1234567" class="w-full text-xs border border-slate-300 rounded-lg px-3 py-2 font-mono focus:ring-2 focus:ring-emerald-500">
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Department</label>
+          <select name="dept" class="w-full text-xs border border-slate-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-emerald-500">
+            <option value="PPC">PPC</option>
+            <option value="Lot Making">Lot Making</option>
+            <option value="Fabric Store">Fabric Store</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Sub-Role</label>
+          <select name="role" class="w-full text-xs border border-slate-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-emerald-500">
+            <option value="Helper">Helper</option>
+            <option value="Clerk">Clerk</option>
+            <option value="Incharge">Incharge</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Monthly Salary</label>
+          <input type="number" step="100" name="salary" placeholder="35000" class="w-full text-xs border border-slate-300 rounded-lg px-3 py-2 font-mono focus:ring-2 focus:ring-emerald-500">
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-3 border-t border-slate-100">
+        <button type="button" onclick="toggleAddStaffModal()" class="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
+        <button type="submit" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow-xs">Save Staff Record</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function toggleAddStaffModal() {
+  document.getElementById('addStaffModal').classList.toggle('hidden');
+}
+
+function filterStaffTable() {
+  const query = document.getElementById('staffSearch').value.toLowerCase();
+  const rows = document.querySelectorAll('#staffTable tbody tr');
+  rows.forEach(r => {
+    const text = r.innerText.toLowerCase();
+    r.style.display = text.includes(query) ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}

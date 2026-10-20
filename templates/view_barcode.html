@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}View Machine Barcodes | TexFlow ERP{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex justify-between items-center">
+    <div>
+      <h1 class="text-lg font-bold text-slate-900">Machine Barcodes Search (/view-barcode)</h1>
+      <p class="text-xs text-slate-500 mt-1">Review active machine barcodes linked with Work Orders, Shades, and Needles.</p>
+    </div>
+  </div>
+
+  <form method="GET" action="{{ url_for('view_barcode') }}" class="bg-white p-4 rounded-xl border border-slate-200 flex items-center gap-3">
+    <input type="text" name="work_order" value="{{ search_query }}" placeholder="Filter by Work Order (e.g. WO-2026-8801)..."
+      class="flex-1 px-3 py-2 border rounded-lg text-xs font-mono uppercase">
+    <button type="submit" class="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-semibold">
+      Search
+    </button>
+  </form>
+
+  <div class="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs">
+        <thead class="bg-slate-50 text-slate-600 uppercase text-[10px] font-semibold border-b">
+          <tr>
+            <th class="py-2.5 px-4">5-Digit Barcode</th>
+            <th class="py-2.5 px-4">Machine & Unit</th>
+            <th class="py-2.5 px-4">Job Reference</th>
+            <th class="py-2.5 px-4">Needles Spec</th>
+            <th class="py-2.5 px-4">Shade Reference</th>
+            <th class="py-2.5 px-4">Assigned Time</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          {% for r in results %}
+          <tr class="hover:bg-slate-50">
+            <td class="py-2.5 px-4 font-mono font-bold text-emerald-700 bg-emerald-50/50">{{ r['unique_code'] }}</td>
+            <td class="py-2.5 px-4 font-bold">{{ r['machine_no'] }} (Unit {{ r['unit_no'] }})</td>
+            <td class="py-2.5 px-4 font-mono">{{ r['job_full_text'] }}</td>
+            <td class="py-2.5 px-4 font-mono">{{ r['needles'] }}</td>
+            <td class="py-2.5 px-4 font-medium">{{ r['shade_ref'] or '-' }}</td>
+            <td class="py-2.5 px-4 font-mono text-slate-500 text-[11px]">{{ r['created_at'] }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="6" class="p-8 text-center text-slate-400">Search for a Work Order to view machine allocations.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

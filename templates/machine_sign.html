@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Machine Sign-In & 5-Digit Barcode Generator | TexFlow ERP{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+    <h1 class="text-lg font-bold text-slate-900">Knitting Machine Sign-In (/machine-sign)</h1>
+    <p class="text-xs text-slate-500 mt-1">Assigns machine to a Job ID and generates a unique 5-digit code scanned during Roll Entry.</p>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Form -->
+    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+      <h2 class="font-bold text-sm text-slate-900 mb-4 pb-2 border-b border-slate-100">Sign-In Form</h2>
+      <form action="{{ url_for('machine_sign') }}" method="POST" class="space-y-3.5">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Work Order</label>
+          <select id="wo_select" name="work_order" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono bg-white">
+            <option value="">-- Choose Work Order --</option>
+            {% for wo in work_orders %}
+              <option value="{{ wo['work_order'] }}">{{ wo['work_order'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Fabric Shade</label>
+          <select id="shade_select" required class="w-full px-3 py-2 border rounded-lg text-xs bg-white">
+            <option value="">-- Choose Shade --</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Job ID</label>
+          <select id="job_select" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono bg-white">
+            <option value="">-- Job --</option>
+          </select>
+          <input type="hidden" name="job_text" id="job_text_input">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Needles Spec</label>
+            <input type="text" name="needles" id="needles_input" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase bg-slate-50">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Machine No</label>
+            <input type="text" name="machine" required placeholder="e.g. M-01" class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Knitting Unit</label>
+          <input type="number" name="unit" value="1" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono">
+        </div>
+
+        <button type="submit" class="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold uppercase tracking-wider">
+          Generate 5-Digit Unique Barcode
+        </button>
+      </form>
+    </div>
+
+    <!-- Live Machines Table -->
+    <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+      <h2 class="font-bold text-sm text-slate-900 mb-3 pb-2 border-b border-slate-100">Signed Machines for Work Order</h2>
+      <div id="machines_container" class="overflow-x-auto text-xs text-slate-500">
+        Select a Work Order above to fetch real-time assigned machines via /api/assignments-by-wo.
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const woSelect = document.getElementById('wo_select');
+  const shadeSelect = document.getElementById('shade_select');
+  const jobSelect = document.getElementById('job_select');
+  const jobTextInput = document.getElementById('job_text_input');
+  const needlesInput = document.getElementById('needles_input');
+  const machinesContainer = document.getElementById('machines_container');
+
+  woSelect.addEventListener('change', async function() {
+    const wo = this.value;
+    if (!wo) return;
+
+    // 1. Fetch shades
+    const res = await fetch('/api/shades-by-wo/' + encodeURIComponent(wo));
+    const shades = await res.json();
+    shadeSelect.innerHTML = '<option value="">-- Choose Shade --</option>';
+    shades.forEach(s => shadeSelect.innerHTML += \`<option value="\${s}">\${s}</option>\`);
+
+    // 2. Fetch assigned machines
+    const mRes = await fetch('/api/assignments-by-wo/' + encodeURIComponent(wo));
+    const assignments = await mRes.json();
+    renderAssignments(assignments);
+  });
+
+  shadeSelect.addEventListener('change', async function() {
+    const wo = woSelect.value;
+    const shade = this.value;
+    if (!wo || !shade) return;
+
+    const res = await fetch(\`/api/jobs-by-shade/\${encodeURIComponent(wo)}/\${encodeURIComponent(shade)}\`);
+    const jobs = await res.json();
+    jobSelect.innerHTML = '<option value="">-- Job --</option>';
+    jobs.forEach(j => {
+      jobSelect.innerHTML += \`<option value="\${j.job}" data-needles="\${j.needles_ref}">Job #\${j.job} (\${j.needles_ref})</option>\`;
+    });
+  });
+
+  jobSelect.addEventListener('change', function() {
+    const selected = this.options[this.selectedIndex];
+    const jobId = this.value;
+    const wo = woSelect.value;
+    if (jobId && wo) {
+      jobTextInput.value = \`\${jobId}/\${wo}\`;
+      needlesInput.value = selected.getAttribute('data-needles') || '';
+    }
+  });
+
+  function renderAssignments(list) {
+    if (list.length === 0) {
+      machinesContainer.innerHTML = '<p class="p-4 text-center text-slate-400">No machines signed in for this Work Order.</p>';
+      return;
+    }
+    let html = '<table class="w-full text-left text-xs"><thead class="bg-slate-50 uppercase text-[10px] border-b"><tr><th class="p-2">Code</th><th class="p-2">Machine</th><th class="p-2">Job</th><th class="p-2">Needles</th><th class="p-2 text-right">Action</th></tr></thead><tbody class="divide-y">';
+    list.forEach(m => {
+      html += \`<tr class="hover:bg-slate-50"><td class="p-2 font-mono font-bold text-emerald-700 bg-emerald-50">\${m.unique_code}</td><td class="p-2 font-bold">\${m.machine_no} (Unit \${m.unit_no})</td><td class="p-2 font-mono">\${m.job_full_text}</td><td class="p-2 font-mono">\${m.needles}</td><td class="p-2 text-right"><a href="/machine-sign/delete/\${m.id}" class="text-rose-600 hover:underline">Sign-Out</a></td></tr>\`;
+    });
+    html += '</tbody></table>';
+    machinesContainer.innerHTML = html;
+  }
+</script>
+{% endblock %}

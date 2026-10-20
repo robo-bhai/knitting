@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Gate Pass #{{ d.gate_pass_no or d.bag_number }} - TexFlow</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 min-h-screen p-4 sm:p-8 font-sans">
+  <!-- Controls -->
+  <div class="max-w-3xl mx-auto mb-4 flex justify-between items-center no-print">
+    <a href="{{ url_for('dispatch_management') }}" class="text-xs text-slate-600 hover:text-slate-900 font-semibold">
+      &larr; Back to Dispatch
+    </a>
+    <button onclick="window.print()" class="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold shadow-md hover:bg-slate-800">
+      Print Gate Pass (PDF)
+    </button>
+  </div>
+
+  <!-- Document Paper -->
+  <div class="max-w-3xl mx-auto bg-white p-8 sm:p-10 rounded-xl shadow-lg border border-slate-200">
+    <!-- Header -->
+    <div class="border-b-2 border-slate-900 pb-4 mb-6">
+      <div class="flex justify-between items-start">
+        <div>
+          <h1 class="text-2xl font-black text-slate-900 tracking-tight">TEXFLOW TEXTILE MILLS</h1>
+          <p class="text-xs text-slate-500 font-medium">Plot 45-B, Industrial Estate, Sector 7-A &bull; Phone: +92-21-35050000</p>
+        </div>
+        <div class="text-right">
+          <span class="inline-block px-3 py-1 bg-slate-900 text-white text-xs font-mono font-bold uppercase rounded">
+            Gate Pass Outward
+          </span>
+          <p class="text-xs font-mono text-slate-600 mt-1 font-bold">GP #: {{ d.gate_pass_no or 'GP-' + d.bag_number }}</p>
+          <p class="text-[11px] text-slate-500 font-mono">{{ d.dispatched_at }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Metadata Grid -->
+    <div class="grid grid-cols-2 gap-4 text-xs mb-6 bg-slate-50 p-4 rounded-lg border border-slate-200">
+      <div>
+        <p class="text-slate-500 text-[11px]">Consignee / Customer:</p>
+        <p class="font-bold text-slate-900 text-sm">{{ d.customer_name }}</p>
+      </div>
+      <div>
+        <p class="text-slate-500 text-[11px]">Bag Number:</p>
+        <p class="font-mono font-bold text-slate-900 text-sm">{{ d.bag_number }}</p>
+      </div>
+      <div>
+        <p class="text-slate-500 text-[11px]">Vehicle Number:</p>
+        <p class="font-mono font-bold text-slate-900">{{ d.vehicle_no }}</p>
+      </div>
+      <div>
+        <p class="text-slate-500 text-[11px]">Driver Name:</p>
+        <p class="font-bold text-slate-900">{{ d.driver_name }}</p>
+      </div>
+      <div>
+        <p class="text-slate-500 text-[11px]">Total Rolls Dispatched:</p>
+        <p class="font-bold text-slate-900">{{ d.total_rolls }} Rolls</p>
+      </div>
+      <div>
+        <p class="text-slate-500 text-[11px]">Net Dispatched Weight:</p>
+        <p class="font-bold text-emerald-800 text-sm font-mono">{{ d.total_weight }} KG</p>
+      </div>
+    </div>
+
+    <!-- Rolls Itemized Table -->
+    <div class="mb-8">
+      <h3 class="text-xs font-bold uppercase tracking-wider text-slate-800 mb-2">Itemized Fabric Rolls</h3>
+      <table class="w-full text-left text-xs border border-slate-300">
+        <thead class="bg-slate-100 text-[11px] uppercase font-bold text-slate-700 border-b border-slate-300">
+          <tr>
+            <th class="py-2 px-3 border-r border-slate-300">#</th>
+            <th class="py-2 px-3 border-r border-slate-300">Roll Barcode</th>
+            <th class="py-2 px-3 border-r border-slate-300">Lot Name</th>
+            <th class="py-2 px-3 border-r border-slate-300">Shade</th>
+            <th class="py-2 px-3 border-r border-slate-300">Needles</th>
+            <th class="py-2 px-3 text-right">QC Weight (KG)</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200 font-mono">
+          {% for r in rolls %}
+          <tr>
+            <td class="py-1.5 px-3 border-r border-slate-200">{{ loop.index }}</td>
+            <td class="py-1.5 px-3 border-r border-slate-200 font-bold">{{ r.roll_barcode }}</td>
+            <td class="py-1.5 px-3 border-r border-slate-200 font-sans">{{ r.lot_name }}</td>
+            <td class="py-1.5 px-3 border-r border-slate-200 font-sans">{{ r.shade }}</td>
+            <td class="py-1.5 px-3 border-r border-slate-200">{{ r.needles }}</td>
+            <td class="py-1.5 px-3 text-right font-bold text-slate-900">{{ r.grade_a_weight or '-' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot class="bg-slate-50 border-t-2 border-slate-300 font-bold">
+          <tr>
+            <td colspan="5" class="py-2 px-3 text-right uppercase text-[11px]">Total Net Weight:</td>
+            <td class="py-2 px-3 text-right font-mono text-emerald-800 text-sm">{{ d.total_weight }} KG</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <!-- Signatures -->
+    <div class="pt-8 border-t border-slate-300 grid grid-cols-3 gap-6 text-center text-xs">
+      <div>
+        <div class="h-12 border-b border-dashed border-slate-400 mb-1"></div>
+        <p class="font-bold text-slate-800">Prepared By</p>
+        <p class="text-[10px] text-slate-500">Store Incharge</p>
+      </div>
+      <div>
+        <div class="h-12 border-b border-dashed border-slate-400 mb-1"></div>
+        <p class="font-bold text-slate-800">Driver Signature</p>
+        <p class="text-[10px] text-slate-500">Received in good condition</p>
+      </div>
+      <div>
+        <div class="h-12 border-b border-dashed border-slate-400 mb-1"></div>
+        <p class="font-bold text-slate-800">Security Gate Out</p>
+        <p class="text-[10px] text-slate-500">Stamp & Time</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

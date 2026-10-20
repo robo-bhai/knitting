@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{% if lot %}Edit Lot{% else %}New Lot{% endif %} | TexFlow ERP{% endblock %}
+
+{% block content %}
+<div class="max-w-lg mx-auto bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+  <h1 class="text-base font-bold text-slate-900 mb-4 pb-2 border-b">
+    {% if lot %}Edit Lot {{ lot['lot_name'] }}{% else %}Add New Lot to Bag{% endif %}
+  </h1>
+
+  <form method="POST" class="space-y-4">
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 mb-1">Lot Name *</label>
+        <input type="text" name="lot_name" value="{{ lot['lot_name'] if lot else '' }}" required placeholder="e.g. LOT-A1"
+          class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 mb-1">Needles Spec *</label>
+        <input type="text" name="needles" value="{{ lot['needles'] if lot else '' }}" required placeholder="e.g. 24N or 28N"
+          class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase">
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 mb-1">Fabric Weight (KG) *</label>
+        <input type="number" step="0.1" name="fabric_weight" value="{{ lot['fabric_weight'] if lot else '' }}" required placeholder="450.0"
+          class="w-full px-3 py-2 border rounded-lg text-xs font-mono">
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 mb-1">Length (Meters) *</label>
+        <input type="number" step="1" name="fabric_length" value="{{ lot['fabric_length'] if lot else '' }}" required placeholder="1200"
+          class="w-full px-3 py-2 border rounded-lg text-xs font-mono">
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-xs font-semibold text-slate-700 mb-1">Total Bag Weight (KG)</label>
+      <input type="number" step="0.1" name="bag_weight" value="{{ lot['bag_weight'] if lot else '' }}" placeholder="450.0"
+        class="w-full px-3 py-2 border rounded-lg text-xs font-mono">
+    </div>
+
+    <div>
+      <label class="block text-xs font-semibold text-slate-700 mb-1">Technical Remarks</label>
+      <input type="text" name="remarks" value="{{ lot['remarks'] if lot else '' }}" placeholder="e.g. Single Jersey Combed Cotton 30s"
+        class="w-full px-3 py-2 border rounded-lg text-xs">
+    </div>
+
+    <div class="flex justify-end gap-2 pt-2">
+      <a href="{{ url_for('ppc') }}" class="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded">Cancel</a>
+      <button type="submit" class="px-4 py-1.5 bg-slate-900 text-white rounded text-xs font-semibold">
+        Save Lot
+      </button>
+    </div>
+  </form>
+</div>
+{% endblock %}

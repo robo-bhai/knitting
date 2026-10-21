@@ -9,7 +9,7 @@
   <style>
     .window {
       box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-      transition: width 0.2s, height 0.2s, left 0.2s, top 0.2s;
+      transition: width 0.15s, height 0.15s, left 0.15s, top 0.15s;
     }
     .window.active {
       box-shadow: 0 20px 35px -5px rgba(16, 185, 129, 0.25), 0 10px 15px -5px rgba(0, 0, 0, 0.2);
@@ -20,21 +20,28 @@
       width: 100%;
       height: 100%;
     }
+    .scrollbar-none::-webkit-scrollbar {
+      display: none;
+    }
+    .scrollbar-none {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
   </style>
 </head>
-<body class="bg-slate-900 text-slate-100 h-screen w-screen overflow-hidden flex flex-col font-sans select-none">
+<body class="bg-slate-900 text-slate-100 h-screen w-screen overflow-hidden flex flex-col font-sans select-none relative">
 
   <!-- Desktop Top Bar -->
-  <header class="h-10 bg-slate-950 border-b border-slate-800 flex items-center justify-between px-4 z-50">
-    <div class="flex items-center gap-3">
-      <div class="flex items-center gap-2 font-black text-xs text-white">
+  <header class="h-11 sm:h-10 bg-slate-950 border-b border-slate-800 flex items-center justify-between px-3 sm:px-4 z-[9990] shrink-0">
+    <div class="flex items-center gap-2 sm:gap-3">
+      <div class="flex items-center gap-1.5 sm:gap-2 font-black text-xs text-white">
         <i class="fa-solid fa-industry text-emerald-400"></i>
-        <span>GARMENTFLOW <span class="text-emerald-400 font-mono">DESKTOP OS</span></span>
+        <span>GARMENTFLOW <span class="text-emerald-400 font-mono text-[10px] sm:text-xs">DESKTOP OS</span></span>
       </div>
-      <div class="h-4 w-px bg-slate-800 mx-1"></div>
+      <div class="h-4 w-px bg-slate-800 mx-1 hidden md:block"></div>
       
-      <!-- Layout Presets Dropdown -->
-      <div class="flex items-center gap-1 text-[11px]">
+      <!-- Layout Presets (Hidden on small mobile screens) -->
+      <div class="hidden md:flex items-center gap-1 text-[11px]">
         <button onclick="applyPreset('split')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded font-medium flex items-center gap-1.5 transition-colors">
           <i class="fa-solid fa-table-columns text-emerald-400"></i> Split 50/50
         </button>
@@ -51,65 +58,72 @@
     </div>
 
     <!-- Station Info & Role -->
-    <div class="flex items-center gap-3 text-xs">
-      <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded text-[11px]">
+    <div class="flex items-center gap-2 sm:gap-3 text-xs">
+      <div class="hidden sm:flex items-center gap-2 bg-slate-900 border border-slate-800 px-2 py-1 rounded text-[11px]">
         <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
         <span class="text-slate-400 font-mono">DB:</span>
         <span id="dbIndicator" class="font-bold text-emerald-400 font-mono">Loading...</span>
       </div>
-      <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded text-[11px]">
+      <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-2 py-1 rounded text-[11px]">
         <i class="fa-solid fa-user-shield text-slate-400"></i>
         <span class="font-bold text-white">{{ session.get('user', 'admin') }}</span>
         <span class="px-1.5 py-0.2 bg-emerald-950 text-emerald-400 border border-emerald-800 rounded font-mono uppercase text-[9px]">
           {{ session.get('role', 'admin') }}
         </span>
       </div>
-      <div class="text-[11px] font-mono text-slate-400" id="desktopClock">00:00:00</div>
+      <a href="{{ url_for('index') }}" class="px-2 py-1 bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/60 rounded text-[11px] font-semibold flex items-center gap-1" title="Classic web page view">
+        <i class="fa-solid fa-globe"></i> <span class="hidden sm:inline">Classic</span>
+      </a>
+      <div class="text-[11px] font-mono text-slate-400 hidden sm:block" id="desktopClock">00:00:00</div>
     </div>
   </header>
 
-  <!-- Desktop Main Workspace -->
-  <main id="workspace" class="flex-1 relative overflow-hidden bg-slate-900 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px]">
-    <!-- Windows will be dynamically mounted here -->
+  <!-- Desktop Main Workspace Canvas -->
+  <main id="workspace" class="flex-1 relative overflow-hidden bg-slate-900 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px] pb-14 sm:pb-12">
+    <!-- Windows dynamically mounted here -->
   </main>
 
-  <!-- Desktop Bottom Taskbar -->
-  <footer class="h-11 bg-slate-950 border-t border-slate-800 flex items-center justify-between px-3 z-50">
-    <div class="flex items-center gap-2">
+  <!-- ========================================================
+      MODULES BOTTOM WINDOW / TASKBAR: ALWAYS ON TOP (z-[9999])
+      ======================================================== -->
+  <footer class="fixed bottom-0 left-0 right-0 h-13 sm:h-12 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 flex items-center justify-between px-2 sm:px-3 z-[9999] shadow-2xl">
+    <div class="flex items-center gap-2 flex-1 overflow-hidden mr-2">
       <!-- App Launcher / Start Button -->
-      <button onclick="toggleStartMenu()" id="startBtn" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded flex items-center gap-2 shadow-xs transition-colors">
-        <i class="fa-solid fa-cubes"></i>
+      <button onclick="toggleStartMenu()" id="startBtn" class="px-3 py-2 sm:py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg flex items-center gap-2 shadow-md transition-colors shrink-0">
+        <i class="fa-solid fa-cubes text-sm"></i>
         <span>Modules</span>
       </button>
 
       <!-- Open Windows Dock Tabs -->
-      <div id="taskbarTabs" class="flex items-center gap-1.5 overflow-x-auto max-w-4xl py-0.5">
+      <div id="taskbarTabs" class="flex items-center gap-1.5 overflow-x-auto max-w-full sm:max-w-4xl py-0.5 scrollbar-none">
         <!-- Rendered by JS -->
       </div>
     </div>
 
     <!-- Quick Desktop Actions -->
-    <div class="flex items-center gap-1 text-xs">
-      <button onclick="minimizeAllWindows()" title="Minimize All" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px]">
+    <div class="flex items-center gap-1 text-xs shrink-0">
+      <button onclick="minimizeAllWindows()" title="Minimize All" class="p-2 sm:px-2.5 sm:py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px]">
         <i class="fa-solid fa-window-minimize"></i>
       </button>
-      <button onclick="restoreAllWindows()" title="Restore All" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px]">
+      <button onclick="restoreAllWindows()" title="Restore All" class="p-2 sm:px-2.5 sm:py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px]">
         <i class="fa-solid fa-window-restore"></i>
       </button>
-      <button onclick="closeAllWindows()" title="Close All" class="px-2.5 py-1 bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 rounded text-[11px]">
+      <button onclick="closeAllWindows()" title="Close All" class="p-2 sm:px-2.5 sm:py-1 bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 rounded text-[11px]">
         <i class="fa-solid fa-xmark"></i>
       </button>
     </div>
   </footer>
 
-  <!-- Start Menu / App Launcher Popup -->
-  <div id="startMenu" class="fixed bottom-12 left-3 w-80 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl p-4 z-50 hidden flex flex-col gap-3">
-    <div class="flex items-center justify-between pb-2 border-b border-slate-800">
-      <span class="text-xs font-bold uppercase tracking-wider text-slate-400">GarmentFlow Applications</span>
+  <!-- ========================================================
+      START MENU / MODULES POPUP: ALWAYS ON TOP (z-[10000])
+      ======================================================== -->
+  <div id="startMenu" class="fixed bottom-15 sm:bottom-14 left-2 right-2 sm:right-auto sm:left-3 w-auto sm:w-88 max-h-[75vh] sm:max-h-[540px] bg-slate-950/98 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-2xl p-4 z-[10000] hidden flex flex-col gap-3">
+    <div class="flex items-center justify-between pb-2 border-b border-slate-800 shrink-0">
+      <span class="text-xs font-bold uppercase tracking-wider text-slate-300">GarmentFlow Applications</span>
       <span class="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">RBAC Enabled</span>
     </div>
 
-    <div class="grid grid-cols-2 gap-2 text-xs">
+    <div class="grid grid-cols-2 gap-2 text-xs overflow-y-auto max-h-[60vh] pr-1">
       <button onclick="openWindow('roll_wise', 'Roll-Wise Tracking', '/roll-wise', 'fa-scroll')" class="p-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-emerald-500 rounded-lg text-left flex items-center gap-2.5 transition-all">
         <i class="fa-solid fa-scroll text-emerald-400 text-base"></i>
         <div>
@@ -200,7 +214,8 @@
 
     // Clock
     setInterval(() => {
-      document.getElementById('desktopClock').innerText = new Date().toLocaleTimeString();
+      const el = document.getElementById('desktopClock');
+      if (el) el.innerText = new Date().toLocaleTimeString();
     }, 1000);
 
     // Fetch DB Status
@@ -208,6 +223,7 @@
       .then(res => res.json())
       .then(data => {
         const el = document.getElementById('dbIndicator');
+        if (!el) return;
         if (data.db_type === 'mysql') {
           el.innerText = `MySQL (${data.host})`;
           el.className = 'font-bold text-blue-400 font-mono';
@@ -217,7 +233,8 @@
         }
       })
       .catch(() => {
-        document.getElementById('dbIndicator').innerText = 'SQLite';
+        const el = document.getElementById('dbIndicator');
+        if (el) el.innerText = 'SQLite';
       });
 
     function toggleStartMenu() {
@@ -228,10 +245,14 @@
     document.addEventListener('click', (e) => {
       const menu = document.getElementById('startMenu');
       const btn = document.getElementById('startBtn');
-      if (!menu.contains(e.target) && !btn.contains(e.target)) {
+      if (menu && btn && !menu.contains(e.target) && !btn.contains(e.target)) {
         menu.classList.add('hidden');
       }
     });
+
+    function isMobileScreen() {
+      return window.innerWidth < 768;
+    }
 
     function openWindow(id, title, url, icon = 'fa-window-maximize') {
       document.getElementById('startMenu').classList.add('hidden');
@@ -240,18 +261,22 @@
         // If window is minimized or hidden, restore & focus
         windows[id].minimized = false;
         const winEl = document.getElementById(`win_${id}`);
-        winEl.style.display = 'flex';
+        if (winEl) winEl.style.display = 'flex';
         focusWindow(id);
         renderTaskbar();
         return;
       }
 
-      // Default positioning with staggered cascade
+      const isMobile = isMobileScreen();
+      const ws = document.getElementById('workspace');
+      const wsW = ws ? ws.clientWidth : window.innerWidth;
+      const wsH = ws ? ws.clientHeight : window.innerHeight;
+
       const count = Object.keys(windows).length;
-      const left = 40 + (count % 6) * 35;
-      const top = 30 + (count % 6) * 30;
-      const width = Math.min(window.innerWidth - 80, 880);
-      const height = Math.min(window.innerHeight - 140, 560);
+      const left = isMobile ? 0 : 40 + (count % 6) * 35;
+      const top = isMobile ? 0 : 30 + (count % 6) * 30;
+      const width = isMobile ? wsW : Math.min(window.innerWidth - 80, 880);
+      const height = isMobile ? wsH : Math.min(window.innerHeight - 140, 560);
 
       windows[id] = {
         id,
@@ -263,7 +288,7 @@
         width,
         height,
         minimized: false,
-        maximized: false,
+        maximized: isMobile,
         prevLeft: left,
         prevTop: top,
         prevWidth: width,
@@ -282,35 +307,37 @@
       el.className = 'window absolute bg-slate-900 border border-slate-700 rounded-lg flex flex-col overflow-hidden select-none active';
       el.style.left = `${win.left}px`;
       el.style.top = `${win.top}px`;
-      el.style.width = `${win.width}px`;
-      el.style.height = `${win.height}px`;
-      el.style.zIndex = ++topZIndex;
+      el.style.width = win.maximized ? '100%' : `${win.width}px`;
+      el.style.height = win.maximized ? '100%' : `${win.height}px`;
+      // Clamped to 800 so it NEVER overlaps the bottom taskbar (z-[9999])
+      topZIndex = Math.min(topZIndex + 1, 800);
+      el.style.zIndex = topZIndex;
 
       el.innerHTML = `
         <!-- Window Title Bar -->
-        <div class="h-9 bg-slate-800 border-b border-slate-700 px-3 flex items-center justify-between cursor-move" onmousedown="startDrag('${win.id}', event)">
-          <div class="flex items-center gap-2 text-xs font-bold text-slate-200">
+        <div class="h-9.5 bg-slate-800 border-b border-slate-700 px-3 flex items-center justify-between cursor-move shrink-0" onmousedown="startDrag('${win.id}', event)">
+          <div class="flex items-center gap-2 text-xs font-bold text-slate-200 truncate">
             <i class="fa-solid ${win.icon} text-emerald-400"></i>
-            <span>${win.title}</span>
+            <span class="truncate">${win.title}</span>
           </div>
-          <div class="flex items-center gap-1.5" onmousedown="event.stopPropagation()">
-            <button onclick="refreshWindow('${win.id}')" title="Refresh" class="w-6 h-6 rounded hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-xs">
+          <div class="flex items-center gap-1 shrink-0" onmousedown="event.stopPropagation()">
+            <button onclick="refreshWindow('${win.id}')" title="Refresh" class="w-7 h-7 sm:w-6 sm:h-6 rounded hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-xs">
               <i class="fa-solid fa-rotate-right text-[10px]"></i>
             </button>
-            <button onclick="minimizeWindow('${win.id}')" title="Minimize" class="w-6 h-6 rounded hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-xs">
+            <button onclick="minimizeWindow('${win.id}')" title="Minimize" class="w-7 h-7 sm:w-6 sm:h-6 rounded hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-xs">
               <i class="fa-solid fa-window-minimize text-[9px] -mt-1"></i>
             </button>
-            <button onclick="toggleMaximizeWindow('${win.id}')" title="Maximize/Restore" class="w-6 h-6 rounded hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-xs">
+            <button onclick="toggleMaximizeWindow('${win.id}')" title="Maximize/Restore" class="hidden sm:flex w-6 h-6 rounded hover:bg-slate-700 text-slate-400 hover:text-white items-center justify-center text-xs">
               <i class="fa-regular fa-square text-[10px]"></i>
             </button>
-            <button onclick="closeWindow('${win.id}')" title="Close" class="w-6 h-6 rounded hover:bg-rose-900 hover:text-rose-200 text-slate-400 flex items-center justify-center text-xs">
+            <button onclick="closeWindow('${win.id}')" title="Close" class="w-7 h-7 sm:w-6 sm:h-6 rounded hover:bg-rose-900 hover:text-rose-200 text-slate-400 flex items-center justify-center text-xs">
               <i class="fa-solid fa-xmark text-xs"></i>
             </button>
           </div>
         </div>
 
-        <!-- Window Iframe Content -->
-        <div class="flex-1 bg-white relative">
+        <!-- Window Iframe Content (pb-12 to avoid bottom cutoff) -->
+        <div class="flex-1 bg-white relative pb-12 sm:pb-4">
           <iframe id="frame_${win.id}" src="${win.url}" class="w-full h-full"></iframe>
         </div>
       `;
@@ -324,7 +351,9 @@
       document.querySelectorAll('.window').forEach(w => w.classList.remove('active'));
       const winEl = document.getElementById(`win_${id}`);
       if (winEl) {
-        winEl.style.zIndex = ++topZIndex;
+        // Clamped to 800 so taskbar (z-[9999]) is ALWAYS on top
+        topZIndex = Math.min(topZIndex + 1, 800);
+        winEl.style.zIndex = topZIndex;
         winEl.classList.add('active');
       }
       renderTaskbar();
@@ -352,8 +381,8 @@
 
         el.style.left = '0px';
         el.style.top = '0px';
-        el.style.width = `${ws.clientWidth}px`;
-        el.style.height = `${ws.clientHeight}px`;
+        el.style.width = '100%';
+        el.style.height = '100%';
         win.maximized = true;
       } else {
         el.style.left = `${win.prevLeft}px`;
@@ -379,21 +408,23 @@
 
     function renderTaskbar() {
       const container = document.getElementById('taskbarTabs');
+      if (!container) return;
       container.innerHTML = '';
 
       Object.values(windows).forEach(win => {
         const btn = document.createElement('button');
         const isActive = activeWindowId === win.id && !win.minimized;
-        btn.className = `px-3 py-1 rounded text-xs flex items-center gap-1.5 font-medium transition-all ${
+        btn.className = `px-2.5 py-1.5 sm:py-1 rounded text-xs flex items-center gap-1.5 font-medium transition-all shrink-0 max-w-[140px] truncate ${
           isActive 
             ? 'bg-slate-800 text-emerald-400 border border-emerald-500/50 shadow-inner' 
             : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
         }`;
-        btn.innerHTML = `<i class="fa-solid ${win.icon} text-[10px]"></i> <span>${win.title}</span>`;
+        btn.innerHTML = `<i class="fa-solid ${win.icon} text-[10px]"></i> <span class="truncate">${win.title.split(' ')[0]}</span>`;
         btn.onclick = () => {
           if (win.minimized) {
             win.minimized = false;
-            document.getElementById(`win_${win.id}`).style.display = 'flex';
+            const el = document.getElementById(`win_${win.id}`);
+            if (el) el.style.display = 'flex';
             focusWindow(win.id);
           } else if (activeWindowId === win.id) {
             minimizeWindow(win.id);
@@ -408,6 +439,7 @@
     // Dragging Logic
     let currentDrag = null;
     function startDrag(id, e) {
+      if (isMobileScreen()) return;
       const el = document.getElementById(`win_${id}`);
       if (!el || windows[id]?.maximized) return;
 
@@ -437,8 +469,13 @@
     // Window Presets
     function applyPreset(preset) {
       const ws = document.getElementById('workspace');
-      const w = ws.clientWidth;
-      const h = ws.clientHeight;
+      const w = ws ? ws.clientWidth : window.innerWidth;
+      const h = ws ? ws.clientHeight : window.innerHeight;
+
+      if (isMobileScreen()) {
+        openWindow('roll_wise', 'Roll-Wise Tracking', '/roll-wise', 'fa-scroll');
+        return;
+      }
 
       if (preset === 'split') {
         openWindow('roll_wise', 'Roll-Wise Tracking', '/roll-wise', 'fa-scroll');
@@ -500,8 +537,20 @@
       if (activeWins.length === 0) return;
 
       const ws = document.getElementById('workspace');
-      const w = ws.clientWidth;
-      const h = ws.clientHeight;
+      const w = ws ? ws.clientWidth : window.innerWidth;
+      const h = ws ? ws.clientHeight : window.innerHeight;
+
+      if (isMobileScreen()) {
+        activeWins.forEach(win => {
+          const el = document.getElementById(`win_${win.id}`);
+          if (el) {
+            el.style.left = '0px'; el.style.top = '0px';
+            el.style.width = '100%'; el.style.height = '100%';
+            win.maximized = true;
+          }
+        });
+        return;
+      }
 
       const cols = Math.ceil(Math.sqrt(activeWins.length));
       const rows = Math.ceil(activeWins.length / cols);
@@ -538,9 +587,26 @@
       Object.keys(windows).forEach(closeWindow);
     }
 
-    // Auto-open Split 50/50 on launch as requested
+    // Auto-open on launch based on device width
     window.addEventListener('DOMContentLoaded', () => {
-      applyPreset('split');
+      if (isMobileScreen()) {
+        openWindow('roll_wise', 'Roll-Wise Tracking', '/roll-wise', 'fa-scroll');
+      } else {
+        applyPreset('split');
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      if (isMobileScreen()) {
+        Object.values(windows).forEach(win => {
+          const el = document.getElementById(`win_${win.id}`);
+          if (el) {
+            el.style.left = '0px'; el.style.top = '0px';
+            el.style.width = '100%'; el.style.height = '100%';
+            win.maximized = true;
+          }
+        });
+      }
     });
   </script>
 </body>

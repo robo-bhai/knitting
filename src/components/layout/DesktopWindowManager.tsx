@@ -4,9 +4,9 @@ import { UserRole } from '../../types';
 import {
   ScrollText, Cpu, QrCode, GitFork, CheckSquare, Warehouse,
   Truck, Users, CalendarCheck, Wallet, Receipt, FileSpreadsheet,
-  Search, ShieldAlert, Database, Minus, Square, Copy, X,
-  RotateCcw, Columns, Grid2X2, LayoutGrid, Monitor, Play,
-  Clock, Shield, ArrowUpRight, Maximize2, Minimize2, Eye
+  Search, ShieldAlert, Database, Minus, Square, X,
+  Columns, Grid2X2, LayoutGrid, Monitor, Play,
+  Clock, Shield, Maximize2, Minimize2, Eye
 } from 'lucide-react';
 
 // Views
@@ -55,6 +55,7 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
   const [isStartMenuOpen, setIsStartMenuOpen] = useState<boolean>(false);
   const [searchFilter, setSearchFilter] = useState<string>('');
   const [currentTime, setCurrentTime] = useState<string>(new Date().toLocaleTimeString());
+  const [isMobile, setIsMobile] = useState<boolean>(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
   const workspaceRef = useRef<HTMLDivElement>(null);
 
   // Dragging state
@@ -71,6 +72,35 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
       setCurrentTime(new Date().toLocaleTimeString());
     }, 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  // Handle mobile resize listener
+  useEffect(() => {
+    const handleResize = () => {
+      const mobileNow = window.innerWidth < 768;
+      setIsMobile(mobileNow);
+      if (mobileNow) {
+        setOpenWindows(prev => {
+          const updated = { ...prev };
+          const wsW = workspaceRef.current ? workspaceRef.current.clientWidth : window.innerWidth;
+          const wsH = workspaceRef.current ? workspaceRef.current.clientHeight : (window.innerHeight - 90);
+          Object.keys(updated).forEach(k => {
+            updated[k] = {
+              ...updated[k],
+              x: 0,
+              y: 0,
+              width: wsW,
+              height: wsH,
+              maximized: true
+            };
+          });
+          return updated;
+        });
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   // Registry of all ERP Modules
@@ -172,7 +202,7 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
       icon: Users,
       category: 'Human Resources',
       roles: ['admin', 'manager'],
-      getComponent: () => <HrStaffView onOpenLedger={(id) => openModuleWindow('hr_ledger')} />
+      getComponent: () => <HrStaffView onOpenLedger={() => openModuleWindow('hr_ledger')} />
     },
     {
       id: 'hr_attendance',
@@ -251,9 +281,13 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
     !currentUser || m.roles.includes(currentUser.role)
   );
 
-  // Open default layout on mount (Split 50/50: Roll-Wise & Machine Sign)
+  // Initialize view: on mobile open single fullscreen window, on desktop apply split
   useEffect(() => {
-    applySplit5050();
+    if (window.innerWidth < 768) {
+      openModuleWindow('roll_wise');
+    } else {
+      applySplit5050();
+    }
   }, []);
 
   const openModuleWindow = (moduleId: string) => {
@@ -261,27 +295,29 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
     const mod = availableModules.find(m => m.id === moduleId);
     if (!mod) return;
 
+    const mobileMode = window.innerWidth < 768;
+
     setOpenWindows(prev => {
       if (prev[moduleId]) {
-        // If already open, un-minimize and focus
         return {
           ...prev,
           [moduleId]: {
             ...prev[moduleId],
             minimized: false,
-            zIndex: topZ + 1
+            maximized: mobileMode || prev[moduleId].maximized,
+            zIndex: Math.min(topZ + 1, 800)
           }
         };
       }
 
       const count = Object.keys(prev).length;
-      const wsW = workspaceRef.current ? workspaceRef.current.clientWidth : 1200;
-      const wsH = workspaceRef.current ? workspaceRef.current.clientHeight : 700;
+      const wsW = workspaceRef.current ? workspaceRef.current.clientWidth : window.innerWidth;
+      const wsH = workspaceRef.current ? workspaceRef.current.clientHeight : (window.innerHeight - 90);
 
-      const w = Math.min(wsW - 40, 840);
-      const h = Math.min(wsH - 40, 580);
-      const x = Math.max(20, (count % 5) * 35 + 30);
-      const y = Math.max(20, (count % 5) * 30 + 20);
+      const w = mobileMode ? wsW : Math.min(wsW - 40, 840);
+      const h = mobileMode ? wsH : Math.min(wsH - 40, 580);
+      const x = mobileMode ? 0 : Math.max(20, (count % 5) * 35 + 30);
+      const y = mobileMode ? 0 : Math.max(20, (count % 5) * 30 + 20);
 
       const newWin: WindowItem = {
         id: mod.id,
@@ -291,25 +327,26 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
         roles: mod.roles,
         component: mod.getComponent(),
         minimized: false,
-        maximized: false,
+        maximized: mobileMode,
         x,
         y,
         width: w,
         height: h,
-        zIndex: topZ + 1
+        zIndex: Math.min(topZ + 1, 800)
       };
 
       return { ...prev, [moduleId]: newWin };
     });
 
     setActiveWindowId(moduleId);
-    setTopZ(z => z + 1);
+    setTopZ(z => Math.min(z + 1, 800));
   };
 
   const focusWindow = (id: string) => {
     setActiveWindowId(id);
     setTopZ(z => {
-      const nextZ = z + 1;
+      // Clamped to 800 so it can NEVER overlap the bottom taskbar (z-[9999])
+      const nextZ = Math.min(z + 1, 800);
       setOpenWindows(prev => {
         if (!prev[id]) return prev;
         return {
@@ -358,8 +395,9 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
     focusWindow(id);
   };
 
-  // Dragging Handlers
+  // Dragging Handlers (Disabled on mobile)
   const handleMouseDownHeader = (id: string, e: React.MouseEvent) => {
+    if (isMobile) return;
     focusWindow(id);
     const win = openWindows[id];
     if (win && !win.maximized) {
@@ -374,7 +412,7 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
   };
 
   const handleMouseMoveWorkspace = (e: React.MouseEvent) => {
-    if (!dragRef.current) return;
+    if (!dragRef.current || isMobile) return;
     const { id, startX, startY, origX, origY } = dragRef.current;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
@@ -398,12 +436,18 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
 
   // Presets
   const applySplit5050 = () => {
-    const wsW = workspaceRef.current ? workspaceRef.current.clientWidth : 1200;
-    const wsH = workspaceRef.current ? workspaceRef.current.clientHeight : 700;
+    const wsW = workspaceRef.current ? workspaceRef.current.clientWidth : window.innerWidth;
+    const wsH = workspaceRef.current ? workspaceRef.current.clientHeight : (window.innerHeight - 90);
     const halfW = Math.floor(wsW / 2);
 
     const m1 = availableModules.find(m => m.id === 'roll_wise')!;
     const m2 = availableModules.find(m => m.id === 'machine_sign')!;
+
+    if (window.innerWidth < 768) {
+      // On mobile, open single fullscreen window
+      openModuleWindow('roll_wise');
+      return;
+    }
 
     setOpenWindows({
       roll_wise: {
@@ -442,8 +486,13 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
   };
 
   const applyThreeWayFloor = () => {
-    const wsW = workspaceRef.current ? workspaceRef.current.clientWidth : 1200;
-    const wsH = workspaceRef.current ? workspaceRef.current.clientHeight : 700;
+    if (window.innerWidth < 768) {
+      openModuleWindow('roll_wise');
+      return;
+    }
+
+    const wsW = workspaceRef.current ? workspaceRef.current.clientWidth : window.innerWidth;
+    const wsH = workspaceRef.current ? workspaceRef.current.clientHeight : (window.innerHeight - 90);
     const colW = Math.floor(wsW / 3);
 
     const m1 = availableModules.find(m => m.id === 'machine_sign')!;
@@ -472,8 +521,13 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
   };
 
   const applyGrid2x2 = () => {
-    const wsW = workspaceRef.current ? workspaceRef.current.clientWidth : 1200;
-    const wsH = workspaceRef.current ? workspaceRef.current.clientHeight : 700;
+    if (window.innerWidth < 768) {
+      openModuleWindow('ppc_tree');
+      return;
+    }
+
+    const wsW = workspaceRef.current ? workspaceRef.current.clientWidth : window.innerWidth;
+    const wsH = workspaceRef.current ? workspaceRef.current.clientHeight : (window.innerHeight - 90);
     const halfW = Math.floor(wsW / 2);
     const halfH = Math.floor(wsH / 2);
 
@@ -506,8 +560,20 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
     const wins = Object.values(openWindows).filter(w => !w.minimized);
     if (wins.length === 0) return;
 
-    const wsW = workspaceRef.current ? workspaceRef.current.clientWidth : 1200;
-    const wsH = workspaceRef.current ? workspaceRef.current.clientHeight : 700;
+    const wsW = workspaceRef.current ? workspaceRef.current.clientWidth : window.innerWidth;
+    const wsH = workspaceRef.current ? workspaceRef.current.clientHeight : (window.innerHeight - 90);
+
+    if (isMobile) {
+      // On mobile, just maximize all
+      setOpenWindows(prev => {
+        const updated = { ...prev };
+        wins.forEach(win => {
+          updated[win.id] = { ...win, x: 0, y: 0, width: wsW, height: wsH, maximized: true };
+        });
+        return updated;
+      });
+      return;
+    }
 
     const cols = Math.ceil(Math.sqrt(wins.length));
     const rows = Math.ceil(wins.length / cols);
@@ -559,45 +625,45 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
   };
 
   return (
-    <div className="h-screen w-screen overflow-hidden flex flex-col bg-slate-950 font-sans text-slate-100 select-none">
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-slate-950 font-sans text-slate-100 select-none relative">
       {/* Top Desktop OS Header Bar */}
-      <header className="h-10 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-3 z-40 text-xs shadow-md">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 font-black tracking-tight text-white">
+      <header className="h-11 sm:h-10 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-2.5 sm:px-3 z-[9990] text-xs shadow-md shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-2 font-black tracking-tight text-white">
             <span className="p-1 bg-emerald-500/20 text-emerald-400 rounded">
-              <Monitor className="w-4 h-4" />
+              <Monitor className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </span>
-            <span>GARMENTFLOW <span className="text-emerald-400 font-mono text-[11px]">ERP OS</span></span>
+            <span className="text-xs sm:text-sm">GARMENTFLOW <span className="text-emerald-400 font-mono text-[10px] sm:text-[11px]">ERP</span></span>
           </div>
 
-          <div className="h-4 w-px bg-slate-800 hidden sm:block"></div>
+          <div className="h-4 w-px bg-slate-800 hidden md:block"></div>
 
-          {/* Preset Layout Buttons */}
+          {/* Desktop Presets Bar (hidden on mobile, visible md+) */}
           <div className="hidden md:flex items-center gap-1">
             <button
               onClick={applySplit5050}
-              className="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700 text-slate-200 rounded font-medium text-[11px] flex items-center gap-1.5 transition-colors"
+              className="px-2 py-1 bg-slate-800/90 hover:bg-slate-700 text-slate-200 rounded font-medium text-[11px] flex items-center gap-1.5 transition-colors"
               title="Split Screen 50/50"
             >
               <Columns className="w-3.5 h-3.5 text-emerald-400" /> Split 50/50
             </button>
             <button
               onClick={applyThreeWayFloor}
-              className="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700 text-slate-200 rounded font-medium text-[11px] flex items-center gap-1.5 transition-colors"
+              className="px-2 py-1 bg-slate-800/90 hover:bg-slate-700 text-slate-200 rounded font-medium text-[11px] flex items-center gap-1.5 transition-colors"
               title="3-Way Production Floor"
             >
               <LayoutGrid className="w-3.5 h-3.5 text-blue-400" /> 3-Way Floor
             </button>
             <button
               onClick={applyGrid2x2}
-              className="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700 text-slate-200 rounded font-medium text-[11px] flex items-center gap-1.5 transition-colors"
+              className="px-2 py-1 bg-slate-800/90 hover:bg-slate-700 text-slate-200 rounded font-medium text-[11px] flex items-center gap-1.5 transition-colors"
               title="2x2 Multi-Window Grid"
             >
               <Grid2X2 className="w-3.5 h-3.5 text-amber-400" /> 2x2 Grid
             </button>
             <button
               onClick={tileAllVisible}
-              className="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700 text-slate-200 rounded font-medium text-[11px] flex items-center gap-1.5 transition-colors"
+              className="px-2 py-1 bg-slate-800/90 hover:bg-slate-700 text-slate-200 rounded font-medium text-[11px] flex items-center gap-1.5 transition-colors"
               title="Tile All Open Windows"
             >
               <Grid2X2 className="w-3.5 h-3.5 text-purple-400" /> Tile All
@@ -605,23 +671,11 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
           </div>
         </div>
 
-        {/* Center / Right: DB Engine status, Role Selector & Clock */}
-        <div className="flex items-center gap-3">
-          {/* MySQL / SQLite Connection Badge */}
-          <button
-            onClick={() => openModuleWindow('mysql_setup')}
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded font-mono text-[11px] transition-colors"
-            title="Configure MySQL / SQLite database connection"
-          >
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>MySQL/SQLite:</span>
-            <span className="text-emerald-400 font-bold">Live</span>
-          </button>
-
-          {/* Role Switcher Pill */}
-          <div className="hidden sm:flex items-center gap-1 bg-slate-800/80 border border-slate-700 px-2 py-0.5 rounded text-[11px]">
-            <Shield className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-slate-400">Role:</span>
+        {/* Header Right: Role, DB, Switcher */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Role Pill */}
+          <div className="flex items-center gap-1 bg-slate-800/90 border border-slate-700 px-2 py-0.5 rounded text-[11px]">
+            <Shield className="w-3 h-3 text-slate-400" />
             <select
               value={currentUser?.role || 'admin'}
               onChange={(e) => switchRole(e.target.value as UserRole)}
@@ -634,47 +688,50 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
             </select>
           </div>
 
-          {/* Toggle to Classic Single Page Mode */}
+          {/* Classic View toggle */}
           <button
             onClick={onToggleClassicMode}
-            className="px-2.5 py-1 bg-indigo-950/70 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/60 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors"
+            className="px-2 sm:px-2.5 py-1 bg-indigo-950/80 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/60 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors"
             title="Switch to single-page sidebar view"
           >
-            <Eye className="w-3.5 h-3.5" /> Classic View
+            <Eye className="w-3 h-3" />
+            <span className="hidden sm:inline">Classic View</span>
           </button>
 
-          {/* Desktop Clock */}
-          <div className="text-[11px] font-mono text-slate-400 flex items-center gap-1">
+          {/* Clock */}
+          <div className="text-[11px] font-mono text-slate-400 hidden sm:flex items-center gap-1">
             <Clock className="w-3 h-3 text-slate-500" />
             {currentTime}
           </div>
         </div>
       </header>
 
-      {/* Main Multi-Window Desktop Workspace Canvas */}
+      {/* Main Multi-Window Desktop Workspace Canvas (pb-14 preserves space for bottom bar) */}
       <main
         ref={workspaceRef}
         onMouseMove={handleMouseMoveWorkspace}
         onMouseUp={handleMouseUpWorkspace}
-        className="flex-1 relative overflow-hidden bg-slate-950 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px]"
+        className="flex-1 relative overflow-hidden bg-slate-950 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px] pb-13 sm:pb-12"
       >
         {Object.values(openWindows).map((win) => {
           if (win.minimized) return null;
           const isActive = activeWindowId === win.id;
+
+          const isFull = isMobile || win.maximized;
 
           return (
             <div
               key={win.id}
               style={{
                 position: 'absolute',
-                left: win.maximized ? 0 : win.x,
-                top: win.maximized ? 0 : win.y,
-                width: win.maximized ? '100%' : `${win.width}px`,
-                height: win.maximized ? '100%' : `${win.height}px`,
+                left: isFull ? 0 : win.x,
+                top: isFull ? 0 : win.y,
+                width: isFull ? '100%' : `${win.width}px`,
+                height: isFull ? '100%' : `${win.height}px`,
                 zIndex: win.zIndex
               }}
               onMouseDown={() => focusWindow(win.id)}
-              className={`flex flex-col bg-slate-900 rounded-xl overflow-hidden border shadow-2xl transition-all ${
+              className={`flex flex-col bg-slate-900 ${isFull ? 'rounded-none border-b-0' : 'rounded-xl'} overflow-hidden border shadow-2xl transition-all ${
                 isActive
                   ? 'border-emerald-500 ring-2 ring-emerald-500/20 shadow-emerald-950/40'
                   : 'border-slate-700/80 shadow-black/60'
@@ -683,7 +740,7 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
               {/* Window Title Bar */}
               <div
                 onMouseDown={(e) => handleMouseDownHeader(win.id, e)}
-                className={`h-9.5 px-3.5 flex items-center justify-between border-b cursor-move select-none transition-colors ${
+                className={`h-9.5 px-3 sm:px-3.5 flex items-center justify-between border-b cursor-move select-none transition-colors shrink-0 ${
                   isActive
                     ? 'bg-slate-800 text-white border-slate-700'
                     : 'bg-slate-900/90 text-slate-400 border-slate-800'
@@ -694,30 +751,32 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
                     <win.icon className="w-3.5 h-3.5" />
                   </span>
                   <span className="truncate">{win.title}</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800/80 text-slate-400 uppercase">
+                  <span className="hidden sm:inline-block text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800/80 text-slate-400 uppercase">
                     {win.category}
                   </span>
                 </div>
 
                 {/* Window Actions */}
-                <div className="flex items-center gap-1" onMouseDown={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-1 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
                   <button
                     onClick={() => toggleMinimize(win.id)}
-                    className="w-6 h-6 rounded hover:bg-slate-700/80 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
+                    className="w-7 h-7 sm:w-6 sm:h-6 rounded hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
                     title="Minimize to taskbar"
                   >
                     <Minus className="w-3.5 h-3.5" />
                   </button>
-                  <button
-                    onClick={() => toggleMaximize(win.id)}
-                    className="w-6 h-6 rounded hover:bg-slate-700/80 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
-                    title={win.maximized ? 'Restore' : 'Maximize'}
-                  >
-                    {win.maximized ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
-                  </button>
+                  {!isMobile && (
+                    <button
+                      onClick={() => toggleMaximize(win.id)}
+                      className="w-6 h-6 rounded hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
+                      title={win.maximized ? 'Restore' : 'Maximize'}
+                    >
+                      {win.maximized ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+                    </button>
+                  )}
                   <button
                     onClick={() => closeWindow(win.id)}
-                    className="w-6 h-6 rounded hover:bg-rose-900/80 text-slate-400 hover:text-rose-200 flex items-center justify-center transition-colors"
+                    className="w-7 h-7 sm:w-6 sm:h-6 rounded hover:bg-rose-900 text-slate-400 hover:text-rose-200 flex items-center justify-center transition-colors"
                     title="Close Window"
                   >
                     <X className="w-3.5 h-3.5" />
@@ -725,8 +784,8 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
                 </div>
               </div>
 
-              {/* Window Content Body */}
-              <div className="flex-1 bg-slate-50 overflow-y-auto text-slate-800 p-4">
+              {/* Window Content Body (pb-20 ensures all mobile form submit buttons are accessible) */}
+              <div className="flex-1 bg-slate-50 overflow-y-auto text-slate-800 p-2.5 sm:p-5 pb-20 sm:pb-8">
                 {win.component}
               </div>
             </div>
@@ -741,18 +800,18 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
             </div>
             <h2 className="text-base font-bold text-slate-300 mb-1">Desktop Workspace Ready</h2>
             <p className="text-xs text-slate-500 max-w-sm mb-4 leading-relaxed">
-              No windows are currently visible. Choose an ERP preset below or click <strong>Modules</strong> to launch tasks.
+              No windows are currently visible. Click <strong>Modules</strong> below to launch a form.
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-center gap-2">
               <button
-                onClick={applySplit5050}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-md"
+                onClick={() => openModuleWindow('roll_wise')}
+                className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-md"
               >
-                <Columns className="w-4 h-4" /> Open Production Split (50/50)
+                <ScrollText className="w-4 h-4" /> Open Roll-Wise
               </button>
               <button
                 onClick={() => setIsStartMenuOpen(true)}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-lg border border-slate-700 flex items-center gap-1.5"
+                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-lg border border-slate-700 flex items-center gap-1.5"
               >
                 Browse All Modules
               </button>
@@ -761,24 +820,26 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
         )}
       </main>
 
-      {/* Bottom Taskbar */}
-      <footer className="h-11 bg-slate-950 border-t border-slate-800 flex items-center justify-between px-3 z-50">
+      {/* ========================================================
+          BOTTOM TASKBAR / MODULES WINDOW: ALWAYS ON TOP (z-[9999])
+          ======================================================== */}
+      <footer className="fixed bottom-0 left-0 right-0 h-13 sm:h-12 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 flex items-center justify-between px-2 sm:px-3 z-[9999] shadow-2xl">
         <div className="flex items-center gap-2 flex-1 overflow-hidden mr-2">
-          {/* Start Menu Button */}
+          {/* Main "Modules" Launcher Button */}
           <button
             onClick={() => setIsStartMenuOpen(prev => !prev)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm transition-all ${
+            className={`px-3 py-2 sm:py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 shadow-md transition-all shrink-0 ${
               isStartMenuOpen
-                ? 'bg-emerald-500 text-slate-950 ring-2 ring-emerald-400/50'
+                ? 'bg-emerald-500 text-slate-950 ring-2 ring-emerald-400'
                 : 'bg-emerald-600 hover:bg-emerald-500 text-white'
             }`}
           >
             <Play className="w-3.5 h-3.5 fill-current" />
-            <span>Modules</span>
+            <span className="font-bold tracking-wide">Modules</span>
           </button>
 
-          {/* Open Windows Tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 max-w-3xl">
+          {/* Open Windows Dock Tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 max-w-full sm:max-w-3xl scrollbar-none">
             {Object.values(openWindows).map((win) => {
               const isActive = activeWindowId === win.id && !win.minimized;
               return (
@@ -793,16 +854,16 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
                       focusWindow(win.id);
                     }
                   }}
-                  className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 max-w-[160px] truncate transition-all ${
+                  className={`px-2.5 py-1.5 sm:py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 max-w-[150px] sm:max-w-[170px] truncate transition-all shrink-0 ${
                     isActive
-                      ? 'bg-slate-800 text-emerald-400 border border-emerald-500/50 shadow-inner'
+                      ? 'bg-slate-800 text-emerald-400 border border-emerald-500/60 shadow-inner'
                       : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
                   }`}
                   title={win.title}
                 >
                   <win.icon className="w-3 h-3 shrink-0" />
                   <span className="truncate">{win.title.split(' ')[0]}</span>
-                  {win.minimized && <span className="w-1.5 h-1.5 rounded-full bg-slate-600"></span>}
+                  {win.minimized && <span className="w-1.5 h-1.5 rounded-full bg-slate-600 shrink-0"></span>}
                 </button>
               );
             })}
@@ -813,21 +874,21 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
         <div className="flex items-center gap-1 text-xs shrink-0">
           <button
             onClick={minimizeAll}
-            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded text-[11px]"
+            className="p-1.5 sm:p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded text-[11px]"
             title="Minimize all windows"
           >
             <Minus className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={restoreAll}
-            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded text-[11px]"
+            className="p-1.5 sm:p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded text-[11px]"
             title="Restore all windows"
           >
             <Square className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={closeAll}
-            className="p-1.5 bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800 rounded text-[11px]"
+            className="p-1.5 sm:p-1.5 bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800 rounded text-[11px]"
             title="Close all open windows"
           >
             <X className="w-3.5 h-3.5" />
@@ -835,12 +896,14 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
         </div>
       </footer>
 
-      {/* Start Menu / App Launcher Popup */}
+      {/* ========================================================
+          START MENU / MODULES POPUP: ALWAYS ON TOP (z-[10000])
+          ======================================================== */}
       {isStartMenuOpen && (
         <div
-          className="fixed bottom-12 left-3 w-96 max-h-[540px] bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl p-4 z-50 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2 duration-150"
+          className="fixed bottom-15 sm:bottom-14 left-2 right-2 sm:right-auto sm:left-3 w-auto sm:w-96 max-h-[75vh] sm:max-h-[540px] bg-slate-950/98 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-2xl p-4 z-[10000] flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2 duration-150"
         >
-          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-800 shrink-0">
             <div>
               <div className="text-xs font-bold uppercase tracking-wider text-white">GarmentFlow ERP Suite</div>
               <div className="text-[10px] text-slate-400">Authenticated Role: <span className="font-mono text-emerald-400 uppercase font-bold">{currentUser?.role || 'admin'}</span></div>
@@ -854,7 +917,7 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
           </div>
 
           {/* Search Module Filter */}
-          <div className="relative">
+          <div className="relative shrink-0">
             <input
               type="text"
               value={searchFilter}
@@ -867,7 +930,7 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
           </div>
 
           {/* Modules List Grid */}
-          <div className="flex-1 overflow-y-auto max-h-[380px] space-y-1.5 pr-1">
+          <div className="flex-1 overflow-y-auto max-h-[380px] space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
             {allowedModules
               .filter(m =>
                 m.title.toLowerCase().includes(searchFilter.toLowerCase()) ||
@@ -880,7 +943,7 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
                   className="w-full text-left p-2.5 rounded-xl bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800/80 hover:border-emerald-500/50 flex items-center justify-between gap-3 group transition-all"
                 >
                   <div className="flex items-center gap-3">
-                    <span className="p-2 rounded-lg bg-slate-800 group-hover:bg-emerald-500/20 text-emerald-400 transition-colors">
+                    <span className="p-2 rounded-lg bg-slate-800 group-hover:bg-emerald-500/20 text-emerald-400 transition-colors shrink-0">
                       <mod.icon className="w-4 h-4" />
                     </span>
                     <div>

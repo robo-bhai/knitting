@@ -97,7 +97,7 @@ def db():
     global DB_TYPE
     if DB_TYPE == "mysql" and MYSQL_AVAILABLE:
         try:
-            # First attempt connection to MySQL
+            # First attempt connection via PyMySQL
             if 'pymysql' in sys.modules:
                 ssl_dict = {'ssl': {}} if MYSQL_SSL else {}
                 conn = pymysql.connect(
@@ -110,6 +110,17 @@ def db():
                     cursorclass=pymysql.cursors.DictCursor,
                     autocommit=False,
                     **ssl_dict
+                )
+                return MySQLConnectionWrapper(conn)
+            elif 'mysql.connector' in sys.modules:
+                import mysql.connector
+                conn = mysql.connector.connect(
+                    host=MYSQL_HOST,
+                    port=MYSQL_PORT,
+                    user=MYSQL_USER,
+                    password=MYSQL_PASSWORD,
+                    database=MYSQL_DB,
+                    charset='utf8mb4'
                 )
                 return MySQLConnectionWrapper(conn)
         except Exception as e:

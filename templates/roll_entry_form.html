@@ -2,60 +2,307 @@
 {% block title %}Roll Entry Form | TexFlow ERP{% endblock %}
 
 {% block content %}
-<div class="max-w-xl mx-auto bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-  <h1 class="text-base font-bold text-slate-900 mb-4 pb-2 border-b">Feed Fabric Roll (/roll-entry/form)</h1>
-
-  <form method="POST" action="{{ url_for('roll_entry_form') }}" class="space-y-4">
-    <div class="grid grid-cols-2 gap-3">
-      <div>
-        <label class="block text-xs font-semibold text-slate-700 mb-1">Work Order</label>
-        <input type="text" name="work_order" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase">
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-700 mb-1">Plan ID</label>
-        <input type="text" name="plan_id" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase">
-      </div>
+<div class="max-w-2xl mx-auto space-y-6">
+  <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
+    <div>
+      <h1 class="text-base font-bold text-slate-900 flex items-center gap-2">
+        <i class="fa-solid fa-scroll text-emerald-600"></i>
+        Feed Fabric Roll (/roll-entry/form)
+      </h1>
+      <p class="text-xs text-slate-500 mt-1">
+        Type or select Work Order to auto-cascade Plans, Bags, Lots, and Needles.
+      </p>
     </div>
+    <a href="{{ url_for('roll_entry') }}" class="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200 font-medium">
+      &larr; Roll Station
+    </a>
+  </div>
 
-    <div class="grid grid-cols-2 gap-3">
-      <div>
-        <label class="block text-xs font-semibold text-slate-700 mb-1">Bag Number</label>
-        <input type="text" name="bag" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase">
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-700 mb-1">Lot Name</label>
-        <input type="text" name="lot" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase">
-      </div>
-    </div>
+  <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
+    <form method="POST" action="{{ url_for('roll_entry_form') }}" class="space-y-4" id="rollFormDirect">
+      <!-- 1. Work Order & Plan -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            1. Work Order <span class="text-rose-500">*</span>
+          </label>
+          <input 
+            type="text" 
+            name="work_order" 
+            id="form_wo_input" 
+            list="form_wo_datalist" 
+            required 
+            placeholder="Type or select Work Order..." 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+          >
+          <datalist id="form_wo_datalist">
+            {% for wo in work_orders %}
+              <option value="{{ wo }}">{{ wo }}</option>
+            {% endfor %}
+          </datalist>
+          <p class="text-[10px] text-slate-500 mt-1">Select from list or type WO</p>
+        </div>
 
-    <div class="grid grid-cols-2 gap-3">
-      <div>
-        <label class="block text-xs font-semibold text-slate-700 mb-1">Lot Needles</label>
-        <input type="text" name="needles" required placeholder="e.g. 24N" class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            2. Production Plan <span class="text-rose-500">*</span>
+          </label>
+          <select 
+            name="plan_id" 
+            id="form_plan_select" 
+            required 
+            disabled 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white disabled:bg-slate-100 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+          >
+            <option value="">-- Choose Plan --</option>
+          </select>
+          <p class="text-[10px] text-slate-500 mt-1" id="form_plan_status">Auto-loads when Work Order is chosen</p>
+        </div>
       </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-700 mb-1">Barcode Needles</label>
-        <input type="text" name="barcode_needles" required placeholder="e.g. 24N" class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase">
-      </div>
-    </div>
 
-    <div class="grid grid-cols-2 gap-3">
-      <div>
-        <label class="block text-xs font-semibold text-slate-700 mb-1">Roll Weight (KG) *</label>
-        <input type="number" step="0.01" name="weight" required placeholder="22.50" class="w-full px-3 py-2 border rounded-lg text-xs font-mono font-bold">
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-700 mb-1">Tube No</label>
-        <input type="text" name="tube" value="T-101" class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase">
-      </div>
-    </div>
+      <!-- 2. Bag & Lot -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            3. Bag & Shade <span class="text-rose-500">*</span>
+          </label>
+          <select 
+            name="bag" 
+            id="form_bag_select" 
+            required 
+            disabled 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white disabled:bg-slate-100 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+          >
+            <option value="">-- Choose Bag --</option>
+          </select>
+          <p class="text-[10px] text-slate-500 mt-1" id="form_bag_status">Auto-loads when Plan is chosen</p>
+        </div>
 
-    <div class="flex justify-end gap-2 pt-2">
-      <a href="{{ url_for('roll_entry') }}" class="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded">Back</a>
-      <button type="submit" class="px-5 py-2 bg-slate-900 text-white rounded text-xs font-bold uppercase">
-        Save Roll
-      </button>
-    </div>
-  </form>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            4. Target Lot <span class="text-rose-500">*</span>
+          </label>
+          <select 
+            name="lot" 
+            id="form_lot_select" 
+            required 
+            disabled 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white disabled:bg-slate-100 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+          >
+            <option value="">-- Choose Lot --</option>
+          </select>
+          <p class="text-[10px] text-slate-500 mt-1" id="form_lot_status">Auto-loads when Bag is chosen</p>
+        </div>
+      </div>
+
+      <!-- 3. Needles & Barcode -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Lot Needles</label>
+          <input 
+            type="text" 
+            name="needles" 
+            id="form_needles_input" 
+            required 
+            value="24N" 
+            placeholder="e.g. 24N" 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase bg-slate-50"
+          >
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Machine Barcode Spec</label>
+          <input 
+            type="text" 
+            name="barcode_needles" 
+            id="form_barcode_needles" 
+            required 
+            value="24N" 
+            placeholder="e.g. 24N" 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase bg-slate-50"
+          >
+        </div>
+      </div>
+
+      <!-- 4. Weight & Tube -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            Roll Weight (KG) <span class="text-rose-500">*</span>
+          </label>
+          <input 
+            type="number" 
+            step="0.01" 
+            name="weight" 
+            required 
+            placeholder="22.50" 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+          >
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Tube No</label>
+          <input 
+            type="text" 
+            name="tube" 
+            value="T-101" 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+          >
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between pt-4 border-t border-slate-100">
+        <a href="{{ url_for('roll_entry') }}" class="px-4 py-2 text-xs text-slate-600 hover:bg-slate-100 rounded-lg">
+          Cancel
+        </a>
+        <button 
+          type="submit" 
+          class="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-colors shadow-sm flex items-center gap-2 cursor-pointer"
+        >
+          <i class="fa-solid fa-check"></i>
+          Save Roll Record
+        </button>
+      </div>
+    </form>
+  </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const woInput = document.getElementById('form_wo_input');
+  const planSelect = document.getElementById('form_plan_select');
+  const bagSelect = document.getElementById('form_bag_select');
+  const lotSelect = document.getElementById('form_lot_select');
+  const needlesInput = document.getElementById('form_needles_input');
+  const barcodeNeedlesInput = document.getElementById('form_barcode_needles');
+  const planStatus = document.getElementById('form_plan_status');
+  const bagStatus = document.getElementById('form_bag_status');
+  const lotStatus = document.getElementById('form_lot_status');
+
+  woInput.addEventListener('input', function() {
+    if (this.value.trim()) loadPlans(this.value.trim());
+  });
+
+  woInput.addEventListener('change', function() {
+    if (this.value.trim()) loadPlans(this.value.trim());
+  });
+
+  async function loadPlans(wo) {
+    planSelect.innerHTML = '<option value="">Loading plans...</option>';
+    planSelect.disabled = true;
+    bagSelect.innerHTML = '<option value="">-- Choose Bag --</option>';
+    bagSelect.disabled = true;
+    lotSelect.innerHTML = '<option value="">-- Choose Lot --</option>';
+    lotSelect.disabled = true;
+
+    try {
+      let res = await fetch('/api/plans?wo=' + encodeURIComponent(wo));
+      if (!res.ok) res = await fetch('/api/plans/' + encodeURIComponent(wo));
+      const plans = await res.json();
+      planSelect.innerHTML = '<option value="">-- Choose Plan --</option>';
+
+      if (Array.isArray(plans) && plans.length > 0) {
+        plans.forEach(p => planSelect.innerHTML += `<option value="${p}">${p}</option>`);
+        planSelect.disabled = false;
+        planStatus.innerText = `${plans.length} plan(s) found`;
+        planSelect.selectedIndex = 1;
+        loadBags(planSelect.value);
+      } else {
+        planSelect.innerHTML = '<option value="">No plans found</option>';
+        planSelect.disabled = false;
+        planStatus.innerText = 'No plans registered for this WO';
+      }
+    } catch (e) {
+      console.warn(e);
+      planSelect.innerHTML = '<option value="">Error loading plans</option>';
+      planSelect.disabled = false;
+    }
+  }
+
+  planSelect.addEventListener('change', function() {
+    if (this.value) loadBags(this.value);
+  });
+
+  async function loadBags(planId) {
+    bagSelect.innerHTML = '<option value="">Loading bags...</option>';
+    bagSelect.disabled = true;
+    lotSelect.innerHTML = '<option value="">-- Choose Lot --</option>';
+    lotSelect.disabled = true;
+
+    try {
+      let res = await fetch('/api/bags?plan_id=' + encodeURIComponent(planId));
+      if (!res.ok) res = await fetch('/api/bags/' + encodeURIComponent(planId));
+      const bags = await res.json();
+      bagSelect.innerHTML = '<option value="">-- Choose Bag --</option>';
+
+      if (Array.isArray(bags) && bags.length > 0) {
+        bags.forEach(b => {
+          const bagNo = typeof b === 'object' ? b.bag_number : b;
+          const label = typeof b === 'object' ? (b.label || `${b.bag_number} (${b.shade || 'No Shade'})`) : b;
+          bagSelect.innerHTML += `<option value="${bagNo}">${label}</option>`;
+        });
+        bagSelect.disabled = false;
+        bagStatus.innerText = `${bags.length} bag(s) found`;
+        bagSelect.selectedIndex = 1;
+        loadLots(bagSelect.value);
+      } else {
+        bagSelect.innerHTML = '<option value="">No bags found</option>';
+        bagSelect.disabled = false;
+        bagStatus.innerText = 'No bags for this Plan';
+      }
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+
+  bagSelect.addEventListener('change', function() {
+    if (this.value) loadLots(this.value);
+  });
+
+  async function loadLots(bagNo) {
+    lotSelect.innerHTML = '<option value="">Loading lots...</option>';
+    lotSelect.disabled = true;
+
+    try {
+      let res = await fetch('/api/lots?bag_number=' + encodeURIComponent(bagNo));
+      if (!res.ok) res = await fetch('/api/lots/' + encodeURIComponent(bagNo));
+      const lots = await res.json();
+      lotSelect.innerHTML = '<option value="">-- Choose Lot --</option>';
+
+      if (Array.isArray(lots) && lots.length > 0) {
+        lots.forEach(lot => {
+          lotSelect.innerHTML += `<option value="${lot.lot_name}" data-needles="${lot.needles || '24N'}">${lot.lot_name} (${lot.needles || '24N'} - Bal: ${lot.rem_weight} KG)</option>`;
+        });
+        lotSelect.disabled = false;
+        lotStatus.innerText = `${lots.length} lot(s) found`;
+        lotSelect.selectedIndex = 1;
+        onLotChanged();
+      } else {
+        lotSelect.innerHTML = '<option value="">No lots found</option>';
+        lotSelect.disabled = false;
+        lotStatus.innerText = 'No lots for this Bag';
+      }
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+
+  lotSelect.addEventListener('change', onLotChanged);
+
+  function onLotChanged() {
+    const selected = lotSelect.options[lotSelect.selectedIndex];
+    if (selected) {
+      const needles = selected.getAttribute('data-needles') || '24N';
+      needlesInput.value = needles;
+      barcodeNeedlesInput.value = needles;
+    }
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
+    const firstOption = document.querySelector('#form_wo_datalist option');
+    if (firstOption && !woInput.value) {
+      woInput.value = firstOption.value;
+      loadPlans(firstOption.value);
+    }
+  });
+</script>
 {% endblock %}

@@ -22,7 +22,7 @@ export const MachineSignView: React.FC = () => {
   // Search filter for table
   const [searchWo, setSearchWo] = useState<string>('');
 
-  // 1. Dynamic Shades available for selected Work Order
+  // 1. Dynamic Shades available for selected Work Order (STRICTLY this WO's plans & bags)
   const currentWoObj = workOrders.find(w => w.work_order === selectedWo);
   const woPlanIds = currentWoObj 
     ? plans.filter(p => p.work_order_id === currentWoObj.id).map(p => p.id)
@@ -38,29 +38,23 @@ export const MachineSignView: React.FC = () => {
     .map(j => j.shade_ref)
     .filter(Boolean);
 
-  const allBagsShades = bags.map(b => b.shade).filter(Boolean);
-
-  const baselineShades = [
-    'Raw White', 'Bleach White', 'Jet Black', 'Navy Blue', 
-    'Heather Grey', 'Charcoal Melange', 'Olive Green', 
-    'Royal Blue', 'Maroon', 'Red', 'Beige', 'Bottle Green'
-  ];
-
   const availableShades = Array.from(
     new Set([
       ...shadesFromBags,
-      ...shadesFromJobs,
-      ...(shadesFromBags.length === 0 && shadesFromJobs.length === 0 ? allBagsShades : []),
-      ...baselineShades
+      ...shadesFromJobs
     ])
   );
 
   // Auto-initialize selected shade when WO changes or on first load
   useEffect(() => {
-    if (!selectedShade && availableShades.length > 0) {
-      const initial = shadesFromBags[0] || shadesFromJobs[0] || availableShades[0];
-      setSelectedShade(initial);
-      updateJobAndNeedles(selectedWo, initial);
+    if (availableShades.length > 0) {
+      if (!selectedShade || !availableShades.includes(selectedShade)) {
+        const initial = availableShades[0];
+        setSelectedShade(initial);
+        updateJobAndNeedles(selectedWo, initial);
+      }
+    } else {
+      setSelectedShade('');
     }
   }, [selectedWo, availableShades.length]);
 
@@ -90,20 +84,21 @@ export const MachineSignView: React.FC = () => {
 
   const handleWoChange = (wo: string) => {
     setSelectedWo(wo);
-    const newShades = Array.from(
-      new Set([
-        ...bags.filter(b => {
-          const wObj = workOrders.find(w => w.work_order === wo);
-          return wObj ? plans.some(p => p.work_order_id === wObj.id && p.id === b.plan_id) : false;
-        }).map(b => b.shade),
-        ...jobs.filter(j => j.work_order_ref === wo).map(j => j.shade_ref),
-        ...baselineShades
-      ])
-    ).filter(Boolean);
+    const wObj = workOrders.find(w => w.work_order === wo);
+    const pIds = wObj ? plans.filter(p => p.work_order_id === wObj.id).map(p => p.id) : [];
+    const bShades = bags.filter(b => pIds.includes(b.plan_id)).map(b => b.shade).filter(Boolean);
+    const jShades = jobs.filter(j => j.work_order_ref === wo).map(j => j.shade_ref).filter(Boolean);
+    const newShades = Array.from(new Set([...bShades, ...jShades]));
 
-    const firstShade = newShades[0] || 'Navy Blue';
-    setSelectedShade(firstShade);
-    updateJobAndNeedles(wo, firstShade);
+    if (newShades.length > 0) {
+      setSelectedShade(newShades[0]);
+      setIsCustomShade(false);
+      updateJobAndNeedles(wo, newShades[0]);
+    } else {
+      setSelectedShade('');
+      setSelectedJob('1');
+      setNeedles('24N');
+    }
   };
 
   const handleShadeChange = (shade: string) => {

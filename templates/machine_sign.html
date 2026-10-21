@@ -251,20 +251,15 @@
           handleShadeSelected(shadeSelect.value);
         }
       } else {
-        formStatusBadge.innerText = 'Type custom shade';
-        formStatusBadge.className = 'text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-normal';
+        shadeSelect.innerHTML = '<option value="">-- No shades in this WO Plan (Use Custom Shade) --</option>';
+        formStatusBadge.innerText = 'No shades in this WO plan';
+        formStatusBadge.className = 'text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-normal';
       }
     } catch (err) {
       console.warn('Error fetching shades:', err);
-      formStatusBadge.innerText = 'Fallback shades active';
+      shadeSelect.innerHTML = '<option value="">-- No shades in this WO Plan (Use Custom Shade) --</option>';
+      formStatusBadge.innerText = 'No shades in WO plan';
       formStatusBadge.className = 'text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-normal';
-      const fallbacks = ["Raw White", "Bleach White", "Jet Black", "Navy Blue", "Heather Grey", "Olive Green"];
-      shadeSelect.innerHTML = '<option value="">-- Choose Shade --</option>';
-      fallbacks.forEach(s => shadeSelect.innerHTML += `<option value="${s}">${s}</option>`);
-      if (shadeSelect.options.length > 1) {
-        shadeSelect.selectedIndex = 1;
-        handleShadeSelected(shadeSelect.value);
-      }
     }
 
     // 2. Fetch assigned machines for this WO

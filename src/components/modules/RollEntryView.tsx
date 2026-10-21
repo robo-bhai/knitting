@@ -30,11 +30,11 @@ export const RollEntryView: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Available Plans for WO
-  const woObj = workOrders.find(w => w.work_order === selectedWo);
+  const woObj = workOrders.find(w => w.work_order.toLowerCase() === selectedWo.toLowerCase().trim());
   const availablePlans = woObj ? plans.filter(p => p.work_order_id === woObj.id) : [];
 
   // Available Bags for Plan (exclude finalized bags as in main.py)
-  const planObj = plans.find(p => p.plan_id === selectedPlan);
+  const planObj = plans.find(p => p.plan_id.toLowerCase() === selectedPlan.toLowerCase().trim());
   const availableBags = planObj
     ? bags.filter(b => b.plan_id === planObj.id && !finalizedBags.some(fb => fb.bag_number === b.bag_number))
     : [];
@@ -42,34 +42,88 @@ export const RollEntryView: React.FC = () => {
   // Available Lots for Bag
   const availableLots = selectedBag ? getLotsForBag(selectedBag) : [];
 
-  // When WO changes
+  // Auto-cascade when WO changes
   const handleWoChange = (wo: string) => {
     setSelectedWo(wo);
-    setSelectedPlan('');
-    setSelectedBag('');
-    setSelectedLot('');
     setErrorMsg(null);
+
+    const targetWo = workOrders.find(w => w.work_order.toLowerCase() === wo.toLowerCase().trim());
+    if (targetWo) {
+      const pList = plans.filter(p => p.work_order_id === targetWo.id);
+      if (pList.length > 0) {
+        const firstPlan = pList[0].plan_id;
+        setSelectedPlan(firstPlan);
+
+        const bList = bags.filter(b => b.plan_id === pList[0].id && !finalizedBags.some(fb => fb.bag_number === b.bag_number));
+        if (bList.length > 0) {
+          const firstBag = bList[0].bag_number;
+          setSelectedBag(firstBag);
+
+          const lList = getLotsForBag(firstBag);
+          if (lList.length > 0) {
+            handleLotSelect(lList[0]);
+          } else {
+            setSelectedLot('');
+          }
+        } else {
+          setSelectedBag('');
+          setSelectedLot('');
+        }
+      } else {
+        setSelectedPlan('');
+        setSelectedBag('');
+        setSelectedLot('');
+      }
+    } else {
+      setSelectedPlan('');
+      setSelectedBag('');
+      setSelectedLot('');
+    }
   };
 
   // When Plan changes
   const handlePlanChange = (planId: string) => {
     setSelectedPlan(planId);
-    setSelectedBag('');
-    setSelectedLot('');
     setErrorMsg(null);
+
+    const targetPlan = plans.find(p => p.plan_id.toLowerCase() === planId.toLowerCase().trim());
+    if (targetPlan) {
+      const bList = bags.filter(b => b.plan_id === targetPlan.id && !finalizedBags.some(fb => fb.bag_number === b.bag_number));
+      if (bList.length > 0) {
+        const firstBag = bList[0].bag_number;
+        setSelectedBag(firstBag);
+        const lList = getLotsForBag(firstBag);
+        if (lList.length > 0) {
+          handleLotSelect(lList[0]);
+        } else {
+          setSelectedLot('');
+        }
+      } else {
+        setSelectedBag('');
+        setSelectedLot('');
+      }
+    } else {
+      setSelectedBag('');
+      setSelectedLot('');
+    }
   };
 
   // When Bag changes
   const handleBagChange = (bagNo: string) => {
     setSelectedBag(bagNo);
-    setSelectedLot('');
     setErrorMsg(null);
+    const lList = getLotsForBag(bagNo);
+    if (lList.length > 0) {
+      handleLotSelect(lList[0]);
+    } else {
+      setSelectedLot('');
+    }
   };
 
   // When Lot is picked
   const handleLotSelect = (lot: any) => {
     setSelectedLot(lot.lot_name);
-    setNeedlesInput(lot.needles);
+    setNeedlesInput(lot.needles || '24N');
     if (lot.barcode) {
       setBarcodeInput(lot.barcode);
     }
@@ -149,63 +203,85 @@ export const RollEntryView: React.FC = () => {
 
       {/* Cascading Navigation: Step 1 -> 2 -> 3 */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-        <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-4 flex items-center gap-2">
-          <Layers className="w-4 h-4 text-emerald-600" />
-          Step 1: Select Work Order, Plan & Bag
+        <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-4 flex items-center justify-between">
+          <span className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-emerald-600" />
+            Step 1: Select or Type Work Order, Plan & Bag
+          </span>
+          <span className="text-[11px] font-normal px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+            Auto-Cascading
+          </span>
         </h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {/* WO */}
+          {/* WO (Typeable & Selectable) */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">1. Work Order</label>
-            <select
-              value={selectedWo}
-              onChange={e => handleWoChange(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-            >
-              <option value="">-- Select Work Order --</option>
-              {workOrders.map(w => (
-                <option key={w.id} value={w.work_order}>
-                  {w.work_order}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-semibold text-slate-700">1. Work Order</label>
+              <span className="text-[10px] text-slate-400 font-mono">Type or Select</span>
+            </div>
+            <div className="relative">
+              <input
+                type="text"
+                list="wo-roll-datalist"
+                value={selectedWo}
+                onChange={e => handleWoChange(e.target.value)}
+                placeholder="Search / Type Work Order..."
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+              />
+              <datalist id="wo-roll-datalist">
+                {workOrders.map(w => (
+                  <option key={w.id} value={w.work_order}>
+                    {w.work_order}
+                  </option>
+                ))}
+              </datalist>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1">Select from list or type to filter</p>
           </div>
 
           {/* Plan */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">2. Production Plan</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-semibold text-slate-700">2. Production Plan</label>
+              <span className="text-[10px] text-slate-400 font-mono">{availablePlans.length} plan(s)</span>
+            </div>
             <select
               value={selectedPlan}
-              disabled={!selectedWo}
+              disabled={!selectedWo || availablePlans.length === 0}
               onChange={e => handlePlanChange(e.target.value)}
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
             >
-              <option value="">-- Select Plan --</option>
+              <option value="">{availablePlans.length === 0 ? '-- No Plans for this WO --' : '-- Select Plan --'}</option>
               {availablePlans.map(p => (
                 <option key={p.id} value={p.plan_id}>
                   {p.plan_id}
                 </option>
               ))}
             </select>
+            <p className="text-[10px] text-slate-500 mt-1">Auto-loads for chosen Work Order</p>
           </div>
 
           {/* Bag */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">3. Bag (Shade)</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-semibold text-slate-700">3. Bag (Shade)</label>
+              <span className="text-[10px] text-slate-400 font-mono">{availableBags.length} bag(s)</span>
+            </div>
             <select
               value={selectedBag}
-              disabled={!selectedPlan}
+              disabled={!selectedPlan || availableBags.length === 0}
               onChange={e => handleBagChange(e.target.value)}
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
             >
-              <option value="">-- Select Bag --</option>
+              <option value="">{availableBags.length === 0 ? '-- No Bags in this Plan --' : '-- Select Bag --'}</option>
               {availableBags.map(b => (
                 <option key={b.id} value={b.bag_number}>
                   {b.bag_number} ({b.shade})
                 </option>
               ))}
             </select>
+            <p className="text-[10px] text-slate-500 mt-1">Auto-loads for chosen Plan</p>
           </div>
         </div>
 

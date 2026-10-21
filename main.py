@@ -1041,67 +1041,98 @@ def roll_entry():
     con.close()
     return render_template("roll_entry_select.html", work_orders=work_orders)
 
+@app.route("/api/plans")
 @app.route("/api/plans/<path:work_order>")
-def api_plans(work_order):
-    work_order = unquote(work_order).strip()
+def api_plans(work_order=None):
+    if not work_order:
+        work_order = request.args.get("wo") or request.args.get("work_order") or ""
+    work_order = unquote(work_order).strip() if work_order else ""
     con = db(); cur = con.cursor()
-    cur.execute("""
-        SELECT plans.plan_id FROM plans
-        JOIN work_orders ON plans.work_order_id=work_orders.id
-        WHERE LOWER(TRIM(work_orders.work_order))=LOWER(TRIM(?))
-    """, (work_order,))
-    data = [p["plan_id"] for p in cur.fetchall()]
-    con.close()
-    return jsonify(data)
-
-@app.route("/api/bags/<path:plan_id>")
-def api_bags(plan_id):
-    plan_id = unquote(plan_id).strip()
-    con = db(); cur = con.cursor()
-    cur.execute("""
-        SELECT b.bag_number 
-        FROM bags b
-        JOIN plans p ON b.plan_id = p.id
-        LEFT JOIN finalized_bags fb ON b.bag_number = fb.bag_number
-        WHERE LOWER(TRIM(p.plan_id)) = LOWER(TRIM(?)) AND fb.bag_number IS NULL
-    """, (plan_id,))
-    data = [b["bag_number"] for b in cur.fetchall()]
-    con.close()
-    return jsonify(data)
-
-@app.route("/api/lots/<path:bag_number>")
-def api_lots(bag_number):
-    bag_number = unquote(bag_number).strip()
-    con = db(); cur = con.cursor()
-    cur.execute("""
-        SELECT 
-            l.lot_name, 
-            l.needles, 
-            l.fabric_weight as rem_weight,
-            fr.barcode_used as barcode,
-            m.machine_no,
-            (SELECT COUNT(*) FROM fabric_rolls fr2 
-             WHERE fr2.lot_name = l.lot_name AND fr2.bag_number = b.bag_number) as roll_count
-        FROM lots l
-        JOIN bags b ON l.bag_id = b.id
-        LEFT JOIN fabric_rolls fr ON (fr.bag_number = b.bag_number AND fr.lot_name = l.lot_name)
-        LEFT JOIN machine_assignments m ON fr.barcode_used = m.unique_code
-        WHERE LOWER(TRIM(b.bag_number)) = LOWER(TRIM(?))
-        GROUP BY l.lot_name, fr.barcode_used, l.needles, l.fabric_weight, m.machine_no, b.bag_number
-    """, (bag_number,))
-    rows = cur.fetchall()
-    
     data = []
-    seen = set()
-    for row in rows:
-        item = dict(row)
-        if item.get('roll_count', 0) == 0:
-            item['barcode'] = None
-            item['machine_no'] = None
-        key = f"{item['lot_name']}_{item.get('barcode')}"
-        if key not in seen:
-            data.append(item)
-            seen.add(key)
+    if work_order:
+        try:
+            cur.execute("""
+                SELECT DISTINCT p.plan_id FROM plans p
+                JOIN work_orders wo ON p.work_order_id = wo.id
+                WHERE LOWER(TRIM(wo.work_order)) = LOWER(TRIM(?))
+                ORDER BY p.id ASC
+            """, (work_order,))
+            data = [p["plan_id"] for p in cur.fetchall()]
+        except Exception as e:
+            print(f"[WARN] api_plans error: {e}")
+    con.close()
+    return jsonify(data)
+
+@app.route("/api/bags")
+@app.route("/api/bags/<path:plan_id>")
+def api_bags(plan_id=None):
+    if not plan_id:
+        plan_id = request.args.get("plan_id") or request.args.get("plan") or ""
+    plan_id = unquote(plan_id).strip() if plan_id else ""
+    con = db(); cur = con.cursor()
+    data = []
+    if plan_id:
+        try:
+            cur.execute("""
+                SELECT b.bag_number, b.shade 
+                FROM bags b
+                JOIN plans p ON b.plan_id = p.id
+                LEFT JOIN finalized_bags fb ON LOWER(TRIM(b.bag_number)) = LOWER(TRIM(fb.bag_number))
+                WHERE (LOWER(TRIM(p.plan_id)) = LOWER(TRIM(?)) OR CAST(p.id AS CHAR) = ?) 
+                  AND fb.bag_number IS NULL
+                ORDER BY b.id ASC
+            """, (plan_id, plan_id))
+            for b in cur.fetchall():
+                bag_no = b["bag_number"]
+                shade = b["shade"] or ""
+                label = f"{bag_no} ({shade})" if shade else bag_no
+                data.append({"bag_number": bag_no, "shade": shade, "label": label})
+        except Exception as e:
+            print(f"[WARN] api_bags error: {e}")
+    con.close()
+    return jsonify(data)
+
+@app.route("/api/lots")
+@app.route("/api/lots/<path:bag_number>")
+def api_lots(bag_number=None):
+    if not bag_number:
+        bag_number = request.args.get("bag_number") or request.args.get("bag") or ""
+    bag_number = unquote(bag_number).strip() if bag_number else ""
+    con = db(); cur = con.cursor()
+    data = []
+    if bag_number:
+        try:
+            cur.execute("""
+                SELECT 
+                    l.lot_name, 
+                    l.needles, 
+                    l.fabric_weight as rem_weight,
+                    l.plan_weight,
+                    fr.barcode_used as barcode,
+                    m.machine_no,
+                    (SELECT COUNT(*) FROM fabric_rolls fr2 
+                     WHERE fr2.lot_name = l.lot_name AND fr2.bag_number = b.bag_number) as roll_count
+                FROM lots l
+                JOIN bags b ON l.bag_id = b.id
+                LEFT JOIN fabric_rolls fr ON (fr.bag_number = b.bag_number AND fr.lot_name = l.lot_name)
+                LEFT JOIN machine_assignments m ON fr.barcode_used = m.unique_code
+                WHERE LOWER(TRIM(b.bag_number)) = LOWER(TRIM(?))
+                GROUP BY l.lot_name, fr.barcode_used, l.needles, l.fabric_weight, l.plan_weight, m.machine_no, b.bag_number
+                ORDER BY l.id ASC
+            """, (bag_number,))
+            rows = cur.fetchall()
+            seen = set()
+            for row in rows:
+                item = dict(row)
+                if item.get('roll_count', 0) == 0:
+                    item['barcode'] = None
+                    item['machine_no'] = None
+                key = f"{item['lot_name']}_{item.get('barcode')}"
+                if key not in seen:
+                    data.append(item)
+                    seen.add(key)
+        except Exception as e:
+            print(f"[WARN] api_lots error: {e}")
     con.close()
     return jsonify(data)
 
@@ -1124,13 +1155,14 @@ def shades_by_wo(wo_name=None):
                 shades.append(s)
 
     if wo_name:
-        # 1. Look up shades in bags for this Work Order
+        # 1. STRICTLY: Shades belonging to this specific Work Order's Plans & Bags
         try:
             cur.execute("""
                 SELECT DISTINCT b.shade FROM bags b
                 JOIN plans p ON b.plan_id = p.id
                 JOIN work_orders wo ON p.work_order_id = wo.id
                 WHERE LOWER(TRIM(wo.work_order)) = LOWER(TRIM(?))
+                ORDER BY b.shade ASC
             """, (wo_name,))
             for r in cur.fetchall():
                 val = r['shade'] if isinstance(r, dict) or hasattr(r, '__getitem__') else r[0]
@@ -1138,44 +1170,18 @@ def shades_by_wo(wo_name=None):
         except Exception as e:
             print(f"[WARN] bags shade query error: {e}")
 
-        # 2. Look up shades in jobs for this Work Order
+        # 2. Also check jobs specifically linked to this Work Order
         try:
             cur.execute("""
                 SELECT DISTINCT shade_ref FROM jobs 
                 WHERE LOWER(TRIM(work_order_ref)) = LOWER(TRIM(?))
+                ORDER BY shade_ref ASC
             """, (wo_name,))
             for r in cur.fetchall():
                 val = r['shade_ref'] if isinstance(r, dict) or hasattr(r, '__getitem__') else r[0]
                 add_shade(val)
         except Exception as e:
             print(f"[WARN] jobs shade query error: {e}")
-
-    # 3. If no shades linked yet, pull all existing shades across factory bags and jobs
-    if not shades:
-        try:
-            cur.execute("SELECT DISTINCT shade FROM bags WHERE shade IS NOT NULL AND shade != ''")
-            for r in cur.fetchall():
-                val = r['shade'] if isinstance(r, dict) or hasattr(r, '__getitem__') else r[0]
-                add_shade(val)
-        except Exception:
-            pass
-
-        try:
-            cur.execute("SELECT DISTINCT shade_ref FROM jobs WHERE shade_ref IS NOT NULL AND shade_ref != ''")
-            for r in cur.fetchall():
-                val = r['shade_ref'] if isinstance(r, dict) or hasattr(r, '__getitem__') else r[0]
-                add_shade(val)
-        except Exception:
-            pass
-
-    # 4. Standard industry baseline shades so user is never faced with an empty select
-    standard_shades = [
-        "Raw White", "Bleach White", "Jet Black", "Navy Blue", 
-        "Heather Grey", "Charcoal Melange", "Olive Green", 
-        "Royal Blue", "Maroon", "Red", "Beige", "Bottle Green"
-    ]
-    for s in standard_shades:
-        add_shade(s)
 
     con.close()
     return jsonify(shades)
@@ -1935,8 +1941,10 @@ def roll_entry_form():
         """, (wo, plan, bag, lot, next_roll, weight, tube, bc_needles, datetime.now().strftime("%Y-%m-%d %H:%M"), barcode))
         con.commit(); con.close()
         flash(f"Roll #{next_roll} ({barcode}) added successfully!", "success")
-        return redirect(url_for("roll_entry"))
-    return render_template("roll_entry_form.html")
+    cur.execute("SELECT DISTINCT work_order FROM work_orders ORDER BY work_order DESC")
+    work_orders = [w["work_order"] for w in cur.fetchall()]
+    con.close()
+    return render_template("roll_entry_form.html", work_orders=work_orders)
 
 @app.route("/view-barcode", methods=["GET"])
 @role_required(['clerk', 'incharge', 'manager', 'admin'])

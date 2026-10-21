@@ -3,73 +3,184 @@
 
 {% block content %}
 <div class="space-y-6">
-  <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-    <h1 class="text-lg font-bold text-slate-900">Knitting Roll Entry Station (/roll-entry)</h1>
-    <p class="text-xs text-slate-500 mt-1">Select PPC parameters, validate machine barcodes, and record roll weight with automatic lot balance deduction.</p>
+  <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div>
+      <h1 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+        <i class="fa-solid fa-scroll text-emerald-600"></i>
+        Knitting Roll Entry Station (/roll-entry)
+      </h1>
+      <p class="text-xs text-slate-500 mt-1">
+        Cascading Work Order &rarr; Plan &rarr; Bag &rarr; Lot selection, machine barcode validation, and roll ticket generation.
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="{{ url_for('roll_entry_form') }}" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 transition-colors flex items-center gap-1.5">
+        <i class="fa-solid fa-keyboard"></i> Manual Form (/roll-entry/form)
+      </a>
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-800 text-xs font-semibold rounded-full border border-emerald-200">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        Auto-Cascading Active
+      </span>
+    </div>
   </div>
 
   <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+    <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wider mb-4 flex items-center justify-between">
+      <span class="flex items-center gap-2">
+        <i class="fa-solid fa-diagram-project text-emerald-600"></i>
+        Step 1: Select or Type Work Order, Plan & Bag
+      </span>
+      <span id="cascade_status" class="text-[11px] font-normal px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
+        Choose Work Order
+      </span>
+    </h2>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <!-- 1. Work Order (Typeable + Selectable) -->
       <div>
-        <label class="block text-xs font-semibold text-slate-700 mb-1">1. Work Order</label>
-        <select id="wo_select" class="w-full px-3 py-2 border rounded-lg text-xs font-mono bg-white">
-          <option value="">-- Choose Work Order --</option>
-          {% for wo in work_orders %}
-            <option value="{{ wo }}">{{ wo }}</option>
-          {% endfor %}
-        </select>
+        <div class="flex items-center justify-between mb-1">
+          <label class="block text-xs font-semibold text-slate-700">1. Work Order <span class="text-rose-500">*</span></label>
+          <span class="text-[10px] text-slate-400 font-mono">Select or Type</span>
+        </div>
+        <div class="relative">
+          <input 
+            type="text" 
+            id="wo_input" 
+            list="wo_datalist" 
+            placeholder="Search / Type Work Order..." 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+          >
+          <datalist id="wo_datalist">
+            {% for wo in work_orders %}
+              <option value="{{ wo }}">{{ wo }}</option>
+            {% endfor %}
+          </datalist>
+        </div>
+        <p class="text-[10px] text-slate-500 mt-1">Select from dropdown or start typing to auto-filter</p>
       </div>
 
+      <!-- 2. Production Plan -->
       <div>
-        <label class="block text-xs font-semibold text-slate-700 mb-1">2. Production Plan</label>
-        <select id="plan_select" disabled class="w-full px-3 py-2 border rounded-lg text-xs font-mono bg-white disabled:bg-slate-100">
+        <div class="flex items-center justify-between mb-1">
+          <label class="block text-xs font-semibold text-slate-700">2. Production Plan <span class="text-rose-500">*</span></label>
+          <span id="plan_count_badge" class="text-[10px] text-slate-400 font-mono">--</span>
+        </div>
+        <select id="plan_select" disabled class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
           <option value="">-- Choose Plan --</option>
         </select>
+        <p class="text-[10px] text-slate-500 mt-1" id="plan_hint">Auto-loads plans for selected Work Order</p>
       </div>
 
+      <!-- 3. Bag & Shade -->
       <div>
-        <label class="block text-xs font-semibold text-slate-700 mb-1">3. Bag (Shade)</label>
-        <select id="bag_select" disabled class="w-full px-3 py-2 border rounded-lg text-xs font-mono bg-white disabled:bg-slate-100">
+        <div class="flex items-center justify-between mb-1">
+          <label class="block text-xs font-semibold text-slate-700">3. Bag & Shade <span class="text-rose-500">*</span></label>
+          <span id="bag_count_badge" class="text-[10px] text-slate-400 font-mono">--</span>
+        </div>
+        <select id="bag_select" disabled class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
           <option value="">-- Choose Bag --</option>
         </select>
+        <p class="text-[10px] text-slate-500 mt-1" id="bag_hint">Auto-loads active bags and shades for selected Plan</p>
       </div>
     </div>
 
     <!-- Lots Container -->
     <div id="lots_container" class="mt-6 pt-4 border-t border-slate-100 hidden">
-      <h3 class="text-xs font-bold uppercase text-slate-800 mb-2">Select Target Lot for this Roll:</h3>
-      <div id="lots_grid" class="grid grid-cols-1 sm:grid-cols-3 gap-3"></div>
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-xs font-bold uppercase text-slate-800 flex items-center gap-1.5">
+          <i class="fa-solid fa-cubes text-emerald-600"></i>
+          Select Target Lot for this Roll:
+        </h3>
+        <span class="text-[11px] text-slate-500" id="lots_status_text">Click a Lot card to record roll</span>
+      </div>
+      <div id="lots_grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3"></div>
     </div>
   </div>
 
   <!-- Roll Entry Form -->
   <div id="roll_form_card" class="bg-white rounded-xl border border-slate-200 p-5 shadow-xs hidden">
-    <h2 class="font-bold text-sm text-slate-900 mb-4 pb-2 border-b border-slate-100">Record Fabric Roll Weight</h2>
-    <div id="error_box" class="p-3 mb-3 bg-rose-50 border border-rose-300 rounded text-xs text-rose-800 hidden"></div>
+    <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
+      <div>
+        <h2 class="font-bold text-sm text-slate-900 flex items-center gap-2">
+          <i class="fa-solid fa-weight-scale text-emerald-600"></i>
+          Record Fabric Roll Weight
+        </h2>
+        <p class="text-xs text-slate-500 mt-0.5" id="selected_lot_info">Target: --</p>
+      </div>
+      <span class="text-[11px] px-2.5 py-1 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold" id="active_lot_badge">
+        Lot Active
+      </span>
+    </div>
+
+    <div id="error_box" class="p-3 mb-4 bg-rose-50 border border-rose-300 rounded-lg text-xs text-rose-800 hidden"></div>
 
     <form id="save_roll_form" class="space-y-4">
-      <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">Machine Barcode (5-Digit) *</label>
-          <input type="text" id="machine_barcode" required placeholder="Scan barcode..." class="w-full px-3 py-2 border rounded-lg text-xs font-mono font-bold uppercase">
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            Machine Barcode (5-Digit) <span class="text-rose-500">*</span>
+          </label>
+          <input 
+            type="text" 
+            id="machine_barcode" 
+            required 
+            placeholder="e.g. 52918" 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-emerald-50/20"
+          >
+          <p class="text-[10px] text-slate-500 mt-1">From Machine Sign-In</p>
         </div>
+
         <div>
           <label class="block text-xs font-semibold text-slate-700 mb-1">Needles Spec</label>
-          <input type="text" id="needles_input" readonly class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase bg-slate-50">
+          <input 
+            type="text" 
+            id="needles_input" 
+            readonly 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase bg-slate-50 text-slate-700"
+          >
+          <p class="text-[10px] text-slate-500 mt-1">Locked from Lot Spec</p>
         </div>
+
         <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">Roll Weight (KG) *</label>
-          <input type="number" step="0.01" id="weight_input" required placeholder="22.50" class="w-full px-3 py-2 border rounded-lg text-xs font-mono font-bold text-slate-900">
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            Roll Weight (KG) <span class="text-rose-500">*</span>
+          </label>
+          <input 
+            type="number" 
+            step="0.01" 
+            min="0.1" 
+            max="100.0" 
+            id="weight_input" 
+            required 
+            placeholder="22.50" 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+          >
+          <p class="text-[10px] text-slate-500 mt-1">Net fabric roll weight</p>
         </div>
+
         <div>
           <label class="block text-xs font-semibold text-slate-700 mb-1">Tube No</label>
-          <input type="text" id="tube_input" value="T-101" class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase">
+          <input 
+            type="text" 
+            id="tube_input" 
+            value="T-101" 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+          >
+          <p class="text-[10px] text-slate-500 mt-1">Paper tube identifier</p>
         </div>
       </div>
 
-      <div class="flex justify-end pt-2">
-        <button type="submit" class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold uppercase tracking-wider">
-          Save Roll & Generate Barcode
+      <div class="flex items-center justify-between pt-2">
+        <span class="text-xs text-slate-500">
+          Roll entry automatically deducts fabric weight from lot balance.
+        </span>
+        <button 
+          type="submit" 
+          id="save_roll_btn" 
+          class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-colors shadow-sm flex items-center gap-2 cursor-pointer"
+        >
+          <i class="fa-solid fa-print"></i>
+          Save Roll & Generate Thermal Sticker
         </button>
       </div>
     </form>
@@ -81,68 +192,254 @@
 <script>
   let currentWo = '', currentPlan = '', currentBag = '', currentLot = '', currentNeedles = '';
 
-  const woSelect = document.getElementById('wo_select');
+  const woInput = document.getElementById('wo_input');
   const planSelect = document.getElementById('plan_select');
   const bagSelect = document.getElementById('bag_select');
   const lotsContainer = document.getElementById('lots_container');
   const lotsGrid = document.getElementById('lots_grid');
   const rollFormCard = document.getElementById('roll_form_card');
+  const cascadeStatus = document.getElementById('cascade_status');
+  const planCountBadge = document.getElementById('plan_count_badge');
+  const bagCountBadge = document.getElementById('bag_count_badge');
+  const planHint = document.getElementById('plan_hint');
+  const bagHint = document.getElementById('bag_hint');
+  const selectedLotInfo = document.getElementById('selected_lot_info');
+  const activeLotBadge = document.getElementById('active_lot_badge');
+  const errorBox = document.getElementById('error_box');
+  const saveRollBtn = document.getElementById('save_roll_btn');
 
-  woSelect.addEventListener('change', async function() {
-    currentWo = this.value;
-    planSelect.innerHTML = '<option value="">-- Choose Plan --</option>';
-    bagSelect.innerHTML = '<option value="">-- Choose Bag --</option>';
-    lotsContainer.classList.add('hidden');
-    rollFormCard.classList.add('hidden');
-    if (!currentWo) return;
-
-    const res = await fetch('/api/plans/' + encodeURIComponent(currentWo));
-    const plans = await res.json();
-    plans.forEach(p => planSelect.innerHTML += \`<option value="\${p}">\${p}</option>\`);
-    planSelect.disabled = false;
+  // Trigger when user selects or finishes typing Work Order
+  woInput.addEventListener('input', function() {
+    const val = this.value.trim();
+    if (val) {
+      handleWoSelected(val);
+    }
   });
 
-  planSelect.addEventListener('change', async function() {
-    currentPlan = this.value;
+  woInput.addEventListener('change', function() {
+    const val = this.value.trim();
+    if (val) {
+      handleWoSelected(val);
+    }
+  });
+
+  async function handleWoSelected(wo) {
+    if (wo === currentWo) return;
+    currentWo = wo;
+    currentPlan = '';
+    currentBag = '';
+    currentLot = '';
+
+    planSelect.innerHTML = '<option value="">Loading plans...</option>';
+    planSelect.disabled = true;
     bagSelect.innerHTML = '<option value="">-- Choose Bag --</option>';
+    bagSelect.disabled = true;
     lotsContainer.classList.add('hidden');
     rollFormCard.classList.add('hidden');
+    cascadeStatus.innerText = 'Fetching plans...';
+    cascadeStatus.className = 'text-[11px] font-normal px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800';
+
+    try {
+      let res = await fetch('/api/plans?wo=' + encodeURIComponent(wo));
+      if (!res.ok) {
+        res = await fetch('/api/plans/' + encodeURIComponent(wo));
+      }
+      const plans = await res.json();
+      planSelect.innerHTML = '<option value="">-- Choose Plan --</option>';
+
+      if (Array.isArray(plans) && plans.length > 0) {
+        plans.forEach(p => {
+          planSelect.innerHTML += `<option value="${p}">${p}</option>`;
+        });
+        planSelect.disabled = false;
+        planCountBadge.innerText = `${plans.length} plan(s)`;
+        planHint.innerText = `${plans.length} plan(s) available for ${wo}`;
+        cascadeStatus.innerText = 'Select Plan';
+        cascadeStatus.className = 'text-[11px] font-normal px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800';
+
+        // Auto-select first plan for fast seamless flow
+        planSelect.selectedIndex = 1;
+        handlePlanSelected(planSelect.value);
+      } else {
+        planSelect.innerHTML = '<option value="">No plans found for this WO</option>';
+        planSelect.disabled = false;
+        planCountBadge.innerText = '0 plans';
+        planHint.innerText = 'No plans registered under this Work Order in PPC';
+        cascadeStatus.innerText = 'No plans in WO';
+        cascadeStatus.className = 'text-[11px] font-normal px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800';
+      }
+    } catch (err) {
+      console.warn('Error fetching plans:', err);
+      planSelect.innerHTML = '<option value="">Error loading plans</option>';
+      planSelect.disabled = false;
+    }
+  }
+
+  // Plan Selection
+  planSelect.addEventListener('change', function() {
+    handlePlanSelected(this.value);
+  });
+
+  async function handlePlanSelected(planId) {
+    currentPlan = planId;
+    currentBag = '';
+    currentLot = '';
+
+    bagSelect.innerHTML = '<option value="">Loading bags...</option>';
+    bagSelect.disabled = true;
+    lotsContainer.classList.add('hidden');
+    rollFormCard.classList.add('hidden');
+
     if (!currentPlan) return;
 
-    const res = await fetch('/api/bags/' + encodeURIComponent(currentPlan));
-    const bags = await res.json();
-    bags.forEach(b => bagSelect.innerHTML += \`<option value="\${b}">\${b}</option>\`);
-    bagSelect.disabled = false;
+    cascadeStatus.innerText = 'Fetching bags...';
+    cascadeStatus.className = 'text-[11px] font-normal px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800';
+
+    try {
+      let res = await fetch('/api/bags?plan_id=' + encodeURIComponent(currentPlan));
+      if (!res.ok) {
+        res = await fetch('/api/bags/' + encodeURIComponent(currentPlan));
+      }
+      const bags = await res.json();
+      bagSelect.innerHTML = '<option value="">-- Choose Bag --</option>';
+
+      if (Array.isArray(bags) && bags.length > 0) {
+        bags.forEach(b => {
+          const bagNo = typeof b === 'object' ? b.bag_number : b;
+          const label = typeof b === 'object' ? (b.label || `${b.bag_number} (${b.shade || 'No Shade'})`) : b;
+          bagSelect.innerHTML += `<option value="${bagNo}">${label}</option>`;
+        });
+        bagSelect.disabled = false;
+        bagCountBadge.innerText = `${bags.length} bag(s)`;
+        bagHint.innerText = `${bags.length} bag(s) found in Plan ${currentPlan}`;
+        cascadeStatus.innerText = 'Select Bag';
+        cascadeStatus.className = 'text-[11px] font-normal px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800';
+
+        // Auto-select first bag
+        bagSelect.selectedIndex = 1;
+        handleBagSelected(bagSelect.value);
+      } else {
+        bagSelect.innerHTML = '<option value="">No bags found for this Plan</option>';
+        bagSelect.disabled = false;
+        bagCountBadge.innerText = '0 bags';
+        bagHint.innerText = 'No bags created for this Plan yet in PPC';
+        cascadeStatus.innerText = 'No bags in Plan';
+        cascadeStatus.className = 'text-[11px] font-normal px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800';
+      }
+    } catch (err) {
+      console.warn('Error fetching bags:', err);
+      bagSelect.innerHTML = '<option value="">Error loading bags</option>';
+      bagSelect.disabled = false;
+    }
+  }
+
+  // Bag Selection
+  bagSelect.addEventListener('change', function() {
+    handleBagSelected(this.value);
   });
 
-  bagSelect.addEventListener('change', async function() {
-    currentBag = this.value;
+  async function handleBagSelected(bagNo) {
+    currentBag = bagNo;
+    currentLot = '';
+    lotsContainer.classList.add('hidden');
+    rollFormCard.classList.add('hidden');
+
     if (!currentBag) return;
 
-    const res = await fetch('/api/lots/' + encodeURIComponent(currentBag));
-    const lots = await res.json();
-    lotsGrid.innerHTML = '';
-    lots.forEach(lot => {
-      const card = document.createElement('div');
-      card.className = 'p-3 rounded-lg border border-slate-200 hover:border-emerald-500 cursor-pointer bg-slate-50 hover:bg-white';
-      card.innerHTML = \`<div class="flex justify-between font-bold text-xs"><span>\${lot.lot_name}</span><span>\${lot.needles}</span></div><div class="mt-2 text-xs font-mono">Bal: <strong>\${lot.rem_weight.toFixed(1)} KG</strong></div>\`;
-      card.onclick = () => {
-        currentLot = lot.lot_name;
-        currentNeedles = lot.needles;
-        document.getElementById('needles_input').value = lot.needles;
-        if (lot.barcode) document.getElementById('machine_barcode').value = lot.barcode;
-        rollFormCard.classList.remove('hidden');
-      };
-      lotsGrid.appendChild(card);
-    });
-    lotsContainer.classList.remove('hidden');
-  });
+    cascadeStatus.innerText = 'Loading lots...';
+    try {
+      let res = await fetch('/api/lots?bag_number=' + encodeURIComponent(currentBag));
+      if (!res.ok) {
+        res = await fetch('/api/lots/' + encodeURIComponent(currentBag));
+      }
+      const lots = await res.json();
+      lotsGrid.innerHTML = '';
 
+      if (Array.isArray(lots) && lots.length > 0) {
+        lots.forEach((lot, idx) => {
+          const card = document.createElement('div');
+          card.className = 'p-3 rounded-lg border border-slate-200 hover:border-emerald-500 cursor-pointer bg-slate-50 hover:bg-white transition-all lot-card';
+          card.id = `lot_card_${idx}`;
+          const rem = typeof lot.rem_weight === 'number' ? lot.rem_weight.toFixed(1) : lot.rem_weight;
+          card.innerHTML = `
+            <div class="flex items-center justify-between font-bold text-xs">
+              <span class="text-slate-900">${lot.lot_name}</span>
+              <span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded font-mono text-[10px]">${lot.needles || '24N'}</span>
+            </div>
+            <div class="mt-2 text-xs font-mono text-slate-600 flex items-center justify-between">
+              <span>Rem Balance:</span>
+              <strong class="text-slate-900">${rem} KG</strong>
+            </div>
+            ${lot.barcode ? `<div class="mt-1 text-[10px] text-emerald-700 font-mono">Assigned Code: <strong>${lot.barcode}</strong></div>` : ''}
+          `;
+          card.onclick = () => selectLot(lot, card);
+          lotsGrid.appendChild(card);
+        });
+
+        lotsContainer.classList.remove('hidden');
+        cascadeStatus.innerText = 'Select Lot';
+        cascadeStatus.className = 'text-[11px] font-normal px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800';
+
+        // Auto-select first lot
+        selectLot(lots[0], document.getElementById('lot_card_0'));
+      } else {
+        lotsGrid.innerHTML = '<div class="col-span-3 p-4 text-center text-slate-400 text-xs">No lots created for this bag yet. Please add lots in PPC Tree.</div>';
+        lotsContainer.classList.remove('hidden');
+      }
+    } catch (err) {
+      console.warn('Error fetching lots:', err);
+    }
+  }
+
+  function selectLot(lot, cardEl) {
+    currentLot = lot.lot_name;
+    currentNeedles = lot.needles || '24N';
+
+    // Highlight card
+    document.querySelectorAll('.lot-card').forEach(c => {
+      c.classList.remove('border-emerald-600', 'bg-emerald-50/40', 'ring-2', 'ring-emerald-400');
+    });
+    if (cardEl) {
+      cardEl.classList.add('border-emerald-600', 'bg-emerald-50/40', 'ring-2', 'ring-emerald-400');
+    }
+
+    document.getElementById('needles_input').value = currentNeedles;
+    if (lot.barcode) {
+      document.getElementById('machine_barcode').value = lot.barcode;
+    }
+
+    selectedLotInfo.innerText = `Work Order: ${currentWo} | Plan: ${currentPlan} | Bag: ${currentBag} | Lot: ${currentLot}`;
+    activeLotBadge.innerText = `${currentLot} (${currentNeedles})`;
+    rollFormCard.classList.remove('hidden');
+    errorBox.classList.add('hidden');
+    document.getElementById('weight_input').focus();
+    cascadeStatus.innerText = 'Ready to Record';
+    cascadeStatus.className = 'text-[11px] font-normal px-2.5 py-0.5 rounded-full bg-emerald-600 text-white font-semibold';
+  }
+
+  // Save Roll Submit Handler
   document.getElementById('save_roll_form').addEventListener('submit', async function(e) {
     e.preventDefault();
-    const barcode = document.getElementById('machine_barcode').value;
-    const weight = document.getElementById('weight_input').value;
-    const tube = document.getElementById('tube_input').value;
+    errorBox.classList.add('hidden');
+
+    const barcode = document.getElementById('machine_barcode').value.trim();
+    const weight = parseFloat(document.getElementById('weight_input').value);
+    const tube = document.getElementById('tube_input').value.trim();
+
+    if (!barcode) {
+      errorBox.innerText = 'Please enter or scan the 5-digit Machine Barcode.';
+      errorBox.classList.remove('hidden');
+      return;
+    }
+
+    if (isNaN(weight) || weight <= 0) {
+      errorBox.innerText = 'Please enter a valid weight in KG.';
+      errorBox.classList.remove('hidden');
+      return;
+    }
+
+    saveRollBtn.disabled = true;
+    saveRollBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
 
     const payload = {
       work_order: currentWo,
@@ -150,23 +447,50 @@
       bag_number: currentBag,
       lot_name: currentLot,
       needles: currentNeedles,
-      weight: parseFloat(weight),
+      weight: weight,
       barcode: barcode,
       tube_no: tube
     };
 
-    const res = await fetch('/api/save-roll', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (!data.success) {
-      document.getElementById('error_box').innerText = data.message;
-      document.getElementById('error_box').classList.remove('hidden');
-    } else {
-      alert(\`Roll Saved Successfully! Generated Barcode: \${data.sticker_data.roll_barcode}\`);
-      window.location.reload();
+    try {
+      const res = await fetch('/api/save-roll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!data.success) {
+        errorBox.innerText = data.message || 'Error saving roll';
+        errorBox.classList.remove('hidden');
+        saveRollBtn.disabled = false;
+        saveRollBtn.innerHTML = '<i class="fa-solid fa-print"></i> Save Roll & Generate Thermal Sticker';
+      } else {
+        alert(`Success: Roll #${data.sticker_data ? data.sticker_data.roll_no : ''} Saved! Barcode: ${data.sticker_data ? data.sticker_data.roll_barcode : ''}`);
+        // Advance tube sequence
+        const tubeMatch = tube.match(/\d+/);
+        if (tubeMatch) {
+          document.getElementById('tube_input').value = `T-${parseInt(tubeMatch[0], 10) + 1}`;
+        }
+        document.getElementById('weight_input').value = '';
+        saveRollBtn.disabled = false;
+        saveRollBtn.innerHTML = '<i class="fa-solid fa-print"></i> Save Roll & Generate Thermal Sticker';
+        // Reload lots to refresh remaining weight
+        handleBagSelected(currentBag);
+      }
+    } catch (err) {
+      errorBox.innerText = 'Network error while saving roll. Please try again.';
+      errorBox.classList.remove('hidden');
+      saveRollBtn.disabled = false;
+      saveRollBtn.innerHTML = '<i class="fa-solid fa-print"></i> Save Roll & Generate Thermal Sticker';
+    }
+  });
+
+  // On page load, if first WO exists, initialize
+  window.addEventListener('DOMContentLoaded', () => {
+    const firstOption = document.querySelector('#wo_datalist option');
+    if (firstOption && !woInput.value) {
+      woInput.value = firstOption.value;
+      handleWoSelected(firstOption.value);
     }
   });
 </script>

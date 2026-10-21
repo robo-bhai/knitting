@@ -20,8 +20,11 @@ MYSQL_PORT = int(os.getenv("MYSQL_PORT", 3306))
 MYSQL_USER = os.getenv("MYSQL_USER", "root")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
 MYSQL_DB = os.getenv("MYSQL_DB", "garmentflow_pro")
-MYSQL_SSL = os.getenv("MYSQL_SSL", "false").lower() in ("true", "1", "yes")
 SQLITE_DB = os.getenv("SQLITE_DB", "database.db")
+
+# Admin credentials loaded from environment / GitHub secrets
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin").strip()
+ADMIN_PASSWORDS = os.getenv("ADMIN_PASSWORDS", os.getenv("ADMIN_PASSWORD", "admin123")).strip()
 
 # Optional MySQL Driver check
 MYSQL_AVAILABLE = False
@@ -396,21 +399,19 @@ def repair_and_migrate_db():
                     # Ignore duplicate column errors
                     pass
 
-    # 3. Seed Default System Users if empty
+    # 3. Seed ONLY default Admin user from environment / GitHub secrets if not exists
     try:
-        cur.execute("SELECT COUNT(*) FROM users")
-        row = cur.fetchone()
-        count = row['COUNT(*)'] if isinstance(row, dict) else (row[0] if row else 0)
-        if count == 0:
-            users = [
-                ('admin', 'admin123', 'admin'),
-                ('c1234', 'cp1234', 'clerk'),
-                ('i1234', 'ip1234', 'incharge'),
-                ('m1234', 'mp1234', 'manager')
-            ]
-            cur.executemany("INSERT INTO users (username, password, role) VALUES (?,?,?)", users)
+        cur.execute("SELECT id, password FROM users WHERE username = ?", (ADMIN_USERNAME,))
+        admin_row = cur.fetchone()
+        if not admin_row:
+            cur.execute("INSERT INTO users (username, password, role) VALUES (?, ?, 'admin')", (ADMIN_USERNAME, ADMIN_PASSWORDS))
             con.commit()
-            print("[DB] Default users seeded successfully.")
+            print(f"[DB] Initial Admin user '{ADMIN_USERNAME}' created successfully from environment/secrets.")
+        else:
+            # Sync password if updated in secrets
+            cur.execute("UPDATE users SET password = ? WHERE username = ? AND role = 'admin'", (ADMIN_PASSWORDS, ADMIN_USERNAME))
+            con.commit()
+            print(f"[DB] Admin user '{ADMIN_USERNAME}' verified and synced with environment secrets.")
     except Exception as e:
         print(f"[DB SEED ERROR] {e}")
 
@@ -764,6 +765,25 @@ def add_work_order():
         flash("Work order added", "success")
     return redirect(url_for("ppc"))
 
+@app.route("/ppc/work-order/edit/<int:id>", methods=["GET", "POST"])
+@role_required(['manager', 'admin'])
+def edit_work_order(id):
+    con = db(); cur = con.cursor()
+    if request.method == "POST":
+        new_wo = request.form.get("work_order", "").strip()
+        if new_wo:
+            cur.execute("UPDATE work_orders SET work_order = ? WHERE id = ?", (new_wo, id))
+            con.commit(); con.close()
+            flash("Work order updated successfully", "success")
+            return redirect(url_for("ppc"))
+    cur.execute("SELECT * FROM work_orders WHERE id = ?", (id,))
+    wo = cur.fetchone()
+    con.close()
+    if not wo:
+        flash("Work order not found", "danger")
+        return redirect(url_for("ppc"))
+    return render_template("edit_work_order.html", wo=wo)
+
 @app.route("/ppc/work-order/delete/<int:id>")
 def delete_work_order(id):
     con = db(); cur = con.cursor()
@@ -781,6 +801,25 @@ def add_plan(work_order_id):
         con.commit(); con.close()
         flash("Plan added", "success")
     return redirect(url_for("ppc"))
+
+@app.route("/ppc/plan/edit/<int:id>", methods=["GET", "POST"])
+@role_required(['manager', 'admin'])
+def edit_plan(id):
+    con = db(); cur = con.cursor()
+    if request.method == "POST":
+        p_id = request.form.get("plan_id", "").strip()
+        if p_id:
+            cur.execute("UPDATE plans SET plan_id = ? WHERE id = ?", (p_id, id))
+            con.commit(); con.close()
+            flash("Plan updated successfully", "success")
+            return redirect(url_for("ppc"))
+    cur.execute("SELECT * FROM plans WHERE id = ?", (id,))
+    plan = cur.fetchone()
+    con.close()
+    if not plan:
+        flash("Plan not found", "danger")
+        return redirect(url_for("ppc"))
+    return render_template("edit_plan.html", plan=plan)
 
 @app.route("/ppc/plan/delete/<int:id>")
 def delete_plan(id):
@@ -802,6 +841,26 @@ def new_bag(plan_id):
         flash("Bag created successfully", "success")
         return redirect(url_for("ppc"))
     return render_template("bag_form.html", bag=None)
+
+@app.route("/ppc/bag/edit/<int:id>", methods=["GET", "POST"])
+@role_required(['manager', 'admin'])
+def edit_bag(id):
+    con = db(); cur = con.cursor()
+    if request.method == "POST":
+        bag_no = request.form.get("bag_number", "").strip()
+        shade = request.form.get("shade", "").strip()
+        if bag_no:
+            cur.execute("UPDATE bags SET bag_number = ?, shade = ? WHERE id = ?", (bag_no, shade, id))
+            con.commit(); con.close()
+            flash("Bag updated successfully", "success")
+            return redirect(url_for("ppc"))
+    cur.execute("SELECT * FROM bags WHERE id = ?", (id,))
+    bag = cur.fetchone()
+    con.close()
+    if not bag:
+        flash("Bag not found", "danger")
+        return redirect(url_for("ppc"))
+    return render_template("edit_bag.html", bag=bag)
 
 @app.route("/ppc/bag/delete/<int:id>")
 def delete_bag(id):
@@ -1509,21 +1568,216 @@ def admin_dashboard():
             cur.execute("DELETE FROM users WHERE id = ?", (request.form.get("user_id"),))
         con.commit()
 
-    cur.execute("SELECT SUM(weight) FROM fabric_rolls")
-    prod = cur.fetchone()[0] or 0
-    cur.execute("SELECT COUNT(*) FROM dispatch_records")
-    dispatched = cur.fetchone()[0] or 0
-    cur.execute("SELECT COUNT(DISTINCT bag_id) FROM lots")
-    plans = cur.fetchone()[0] or 0
-    cur.execute("SELECT SUM(grade_a_weight), SUM(grade_b_weight) FROM quality_checks")
+    def get_val(row, key_name, default=0):
+        if not row:
+            return default
+        if isinstance(row, dict):
+            return row.get(key_name, default)
+        try:
+            return row[0] if row[0] is not None else default
+        except (IndexError, KeyError):
+            return default
+
+    cur.execute("SELECT SUM(weight) as total_prod FROM fabric_rolls")
+    prod = get_val(cur.fetchone(), 'total_prod', 0)
+    cur.execute("SELECT COUNT(*) as cnt FROM dispatch_records")
+    dispatched = get_val(cur.fetchone(), 'cnt', 0)
+    cur.execute("SELECT COUNT(DISTINCT bag_id) as cnt FROM lots")
+    plans = get_val(cur.fetchone(), 'cnt', 0)
+    cur.execute("SELECT SUM(grade_a_weight) as ga, SUM(grade_b_weight) as gb FROM quality_checks")
     q = cur.fetchone()
-    ga = q[0] or 0; gb = q[1] or 0
+    if q and isinstance(q, dict):
+        ga = q.get('ga') or 0
+        gb = q.get('gb') or 0
+    elif q:
+        ga = q[0] or 0
+        gb = q[1] or 0
+    else:
+        ga = 0; gb = 0
+
     cur.execute("SELECT * FROM fabric_rolls ORDER BY id DESC LIMIT 10")
     recent = cur.fetchall()
     cur.execute("SELECT * FROM users")
     users = cur.fetchall()
     con.close()
     return render_template("admin_pro.html", **locals())
+
+# ================= EXCEL / CSV REPORT GENERATOR =================
+def generate_plan_excel(wo_name=None, bag_number=None):
+    con = db(); cur = con.cursor()
+    query = """
+        SELECT r.roll_barcode, r.roll_no, r.work_order, r.plan_id, r.bag_number, 
+               b.shade, r.lot_name, r.needles, r.machine_no, r.weight as gross_weight,
+               q.grade_a_weight, q.grade_b_weight,
+               CASE 
+                   WHEN q.in_store = 2 THEN 'Dispatched'
+                   WHEN q.in_store = 1 THEN 'In Store'
+                   WHEN q.grade_a_weight IS NOT NULL THEN 'Checked / QC Done'
+                   ELSE 'Knitted / Pending QC'
+               END as status,
+               q.checked_at
+        FROM fabric_rolls r
+        LEFT JOIN bags b ON r.bag_number = b.bag_number
+        LEFT JOIN quality_checks q ON r.roll_barcode = q.roll_id
+    """
+    params = []
+    if bag_number:
+        query += " WHERE r.bag_number = ? ORDER BY r.roll_no ASC"
+        params.append(bag_number)
+        filename_prefix = f"plan_{bag_number}"
+    elif wo_name:
+        query += " WHERE r.work_order = ? ORDER BY r.bag_number ASC, r.roll_no ASC"
+        params.append(wo_name)
+        filename_prefix = f"plan_report_{wo_name}"
+    else:
+        query += " ORDER BY r.id DESC LIMIT 500"
+        filename_prefix = "plan_report_all"
+
+    cur.execute(query, tuple(params))
+    rows = cur.fetchall()
+    con.close()
+
+    try:
+        import xlsxwriter
+        output = io.BytesIO()
+        workbook = xlsxwriter.Workbook(output, {'in_memory': True})
+        worksheet = workbook.add_worksheet('Plan Report')
+
+        header_fmt = workbook.add_format({
+            'bold': True, 'bg_color': '#0f172a', 'font_color': '#ffffff',
+            'border': 1, 'align': 'center', 'valign': 'vcenter'
+        })
+        num_fmt = workbook.add_format({'num_format': '#,##0.00', 'border': 1})
+        text_fmt = workbook.add_format({'border': 1})
+        date_fmt = workbook.add_format({'border': 1, 'align': 'center'})
+
+        headers = [
+            "Roll Barcode", "Roll #", "Work Order", "Plan ID", "Bag #",
+            "Shade", "Lot Name", "Needles", "Machine", "Gross Weight (KG)",
+            "Grade A (KG)", "Grade B (KG)", "Status", "QC Timestamp"
+        ]
+        for col_idx, h in enumerate(headers):
+            worksheet.write(0, col_idx, h, header_fmt)
+
+        row_idx = 1
+        for r in rows:
+            worksheet.write(row_idx, 0, r['roll_barcode'] or '', text_fmt)
+            worksheet.write(row_idx, 1, r['roll_no'] or 0, text_fmt)
+            worksheet.write(row_idx, 2, r['work_order'] or '', text_fmt)
+            worksheet.write(row_idx, 3, r['plan_id'] or '', text_fmt)
+            worksheet.write(row_idx, 4, r['bag_number'] or '', text_fmt)
+            worksheet.write(row_idx, 5, r['shade'] or '', text_fmt)
+            worksheet.write(row_idx, 6, r['lot_name'] or '', text_fmt)
+            worksheet.write(row_idx, 7, r['needles'] or '', text_fmt)
+            worksheet.write(row_idx, 8, r['machine_no'] or '-', text_fmt)
+            worksheet.write_number(row_idx, 9, float(r['gross_weight'] or 0), num_fmt)
+            worksheet.write_number(row_idx, 10, float(r['grade_a_weight'] or 0), num_fmt)
+            worksheet.write_number(row_idx, 11, float(r['grade_b_weight'] or 0), num_fmt)
+            worksheet.write(row_idx, 12, r['status'] or '', text_fmt)
+            worksheet.write(row_idx, 13, str(r['checked_at'] or ''), date_fmt)
+            row_idx += 1
+
+        worksheet.set_column('A:A', 16)
+        worksheet.set_column('B:B', 8)
+        worksheet.set_column('C:E', 14)
+        worksheet.set_column('F:H', 12)
+        worksheet.set_column('I:L', 14)
+        worksheet.set_column('M:N', 18)
+
+        workbook.close()
+        output.seek(0)
+        return send_file(
+            output,
+            download_name=f"{filename_prefix}.xlsx",
+            as_attachment=True,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    except Exception:
+        import csv
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "Roll Barcode", "Roll #", "Work Order", "Plan ID", "Bag #",
+            "Shade", "Lot Name", "Needles", "Machine", "Gross Weight (KG)",
+            "Grade A (KG)", "Grade B (KG)", "Status", "QC Timestamp"
+        ])
+        for r in rows:
+            writer.writerow([
+                r['roll_barcode'], r['roll_no'], r['work_order'], r['plan_id'], r['bag_number'],
+                r['shade'], r['lot_name'], r['needles'], r['machine_no'], r['gross_weight'],
+                r['grade_a_weight'], r['grade_b_weight'], r['status'], r['checked_at']
+            ])
+        output.seek(0)
+        return send_file(
+            io.BytesIO(output.getvalue().encode('utf-8')),
+            download_name=f"{filename_prefix}.csv",
+            as_attachment=True,
+            mimetype="text/csv"
+        )
+
+@app.route("/reports/export-plan", methods=["POST"])
+def export_plan_report():
+    wo = request.form.get("work_order", "").strip()
+    return generate_plan_excel(wo_name=wo)
+
+@app.route("/reports/export-plan-excel")
+def export_plan_excel():
+    bag = request.args.get("bag_number", "").strip()
+    return generate_plan_excel(bag_number=bag)
+
+@app.route("/roll-entry/form", methods=["GET", "POST"])
+@role_required(['clerk', 'incharge', 'manager', 'admin'])
+def roll_entry_form():
+    if request.method == "POST":
+        d = request.form
+        wo = d.get("work_order", "").strip()
+        plan = d.get("plan_id", "").strip()
+        bag = d.get("bag", "").strip()
+        lot = d.get("lot", "").strip()
+        weight = float(d.get("weight", 0) or 0)
+        tube = d.get("tube", "").strip()
+        needles = d.get("needles", "").strip()
+        bc_needles = d.get("barcode_needles", "").strip() or needles
+
+        con = db(); cur = con.cursor()
+        cur.execute("SELECT MAX(roll_no) FROM fabric_rolls WHERE bag_number = ?", (bag,))
+        row = cur.fetchone()
+        max_no = (row['MAX(roll_no)'] if isinstance(row, dict) else row[0]) if row else None
+        next_roll = 1 if max_no is None else (max_no + 1)
+        barcode = f"R-{bag}-{next_roll:02d}"
+
+        cur.execute("""
+            INSERT INTO fabric_rolls (work_order, plan_id, bag_number, lot_name, roll_no, weight, tube_no, needles, created_at, roll_barcode)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (wo, plan, bag, lot, next_roll, weight, tube, bc_needles, datetime.now().strftime("%Y-%m-%d %H:%M"), barcode))
+        con.commit(); con.close()
+        flash(f"Roll #{next_roll} ({barcode}) added successfully!", "success")
+        return redirect(url_for("roll_entry"))
+    return render_template("roll_entry_form.html")
+
+@app.route("/view-barcode", methods=["GET"])
+@role_required(['clerk', 'incharge', 'manager', 'admin'])
+def view_barcode():
+    search_query = request.args.get("work_order", "").strip()
+    con = db(); cur = con.cursor()
+    if search_query:
+        cur.execute("""
+            SELECT m.*, j.shade_ref
+            FROM machine_assignments m
+            LEFT JOIN jobs j ON m.job_full_text LIKE CONCAT('%', j.job, '%')
+            WHERE m.job_full_text LIKE ?
+            ORDER BY m.id DESC
+        """, (f"%{search_query}%",))
+    else:
+        cur.execute("""
+            SELECT m.*, j.shade_ref
+            FROM machine_assignments m
+            LEFT JOIN jobs j ON m.job_full_text LIKE CONCAT('%', j.job, '%')
+            ORDER BY m.id DESC LIMIT 50
+        """)
+    results = cur.fetchall()
+    con.close()
+    return render_template("view_barcode.html", results=results, search_query=search_query)
 
 @app.route("/reports")
 def reports_menu():
@@ -1552,22 +1806,75 @@ def search_roll():
         con.close()
     return render_template("search_roll.html", roll=roll_data, search_query=barcode)
 
-# Fallback routes for other modules
+# Factory floor operation routes
 @app.route("/downtime", methods=["GET", "POST"])
 def downtime():
-    return render_template("downtime.html") if os.path.exists("templates/downtime.html") else redirect(url_for('index'))
+    con = db(); cur = con.cursor()
+    if request.method == "POST":
+        m = request.form.get("machine", "").strip()
+        r = request.form.get("reason", "").strip()
+        s = request.form.get("start", "").strip()
+        e = request.form.get("end", "").strip()
+        cur.execute("INSERT INTO downtime (machine, reason, start, end) VALUES (?, ?, ?, ?)", (m, r, s, e))
+        con.commit()
+        flash("Downtime logged successfully", "success")
+        con.close()
+        return redirect(url_for("downtime"))
+    cur.execute("SELECT * FROM downtime ORDER BY id DESC LIMIT 25")
+    logs = cur.fetchall()
+    con.close()
+    return render_template("downtime.html", logs=logs)
 
 @app.route("/yarn", methods=["GET", "POST"])
 def yarn():
-    return render_template("yarn.html") if os.path.exists("templates/yarn.html") else redirect(url_for('index'))
+    con = db(); cur = con.cursor()
+    if request.method == "POST":
+        y = request.form.get("yarn", "").strip()
+        q = float(request.form.get("qty", 0) or 0)
+        m = request.form.get("machine", "").strip()
+        a = request.form.get("action", "").strip()
+        cur.execute("INSERT INTO yarn (yarn, qty, machine, action) VALUES (?, ?, ?, ?)", (y, q, m, a))
+        con.commit()
+        flash("Yarn record saved", "success")
+        con.close()
+        return redirect(url_for("yarn"))
+    cur.execute("SELECT * FROM yarn ORDER BY id DESC LIMIT 25")
+    logs = cur.fetchall()
+    con.close()
+    return render_template("yarn.html", logs=logs)
 
 @app.route("/production", methods=["GET", "POST"])
 def production():
-    return render_template("production.html") if os.path.exists("templates/production.html") else redirect(url_for('index'))
+    con = db(); cur = con.cursor()
+    if request.method == "POST":
+        s = request.form.get("shift", "").strip()
+        m = request.form.get("machine", "").strip()
+        q = float(request.form.get("qty", 0) or 0)
+        cur.execute("INSERT INTO production (shift, machine, qty) VALUES (?, ?, ?)", (s, m, q))
+        con.commit()
+        flash("Production record logged", "success")
+        con.close()
+        return redirect(url_for("production"))
+    cur.execute("SELECT * FROM production ORDER BY id DESC LIMIT 25")
+    logs = cur.fetchall()
+    con.close()
+    return render_template("production.html", logs=logs)
 
 @app.route("/faults", methods=["GET", "POST"])
 def faults():
-    return render_template("faults.html") if os.path.exists("templates/faults.html") else redirect(url_for('index'))
+    con = db(); cur = con.cursor()
+    if request.method == "POST":
+        m = request.form.get("machine", "").strip()
+        c = request.form.get("code", "").strip()
+        cur.execute("INSERT INTO faults (machine, code) VALUES (?, ?)", (m, c))
+        con.commit()
+        flash("Fabric defect recorded", "success")
+        con.close()
+        return redirect(url_for("faults"))
+    cur.execute("SELECT * FROM faults ORDER BY id DESC LIMIT 25")
+    logs = cur.fetchall()
+    con.close()
+    return render_template("faults.html", logs=logs)
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))

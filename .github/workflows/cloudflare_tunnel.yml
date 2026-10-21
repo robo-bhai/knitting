@@ -38,6 +38,9 @@ jobs:
       MYSQL_USER: "root"
       MYSQL_PASSWORD: "root"
       MYSQL_DB: "garmentflow_pro"
+      # Admin credentials loaded from GitHub Secrets
+      ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME || 'admin' }}
+      ADMIN_PASSWORDS: ${{ secrets.ADMIN_PASSWORDS || secrets.ADMIN_PASSWORD || 'admin123' }}
 
     steps:
       - name: 📥 Checkout Repository

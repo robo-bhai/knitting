@@ -48,6 +48,9 @@ jobs:
       MYSQL_USER: "root"
       MYSQL_PASSWORD: "root"
       MYSQL_DB: "garmentflow_pro"
+      # Admin credentials loaded from GitHub Secrets
+      ADMIN_USERNAME: \${{ secrets.ADMIN_USERNAME || 'admin' }}
+      ADMIN_PASSWORDS: \${{ secrets.ADMIN_PASSWORDS || secrets.ADMIN_PASSWORD || 'admin123' }}
 
     steps:
       - name: 📥 Checkout Repository
@@ -435,6 +438,18 @@ jobs:
                 <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-bold">ONLY REQUIRED SECRET</span></td>
                 <td className="py-2.5 px-3 text-slate-700 font-medium">Cloudflare Zero Trust connector token. Iss aik token se tunnel, account, aur custom domain sab khud hi connect ho jata hai.</td>
                 <td className="py-2.5 px-3 font-mono text-slate-500">eyJhIjoiY2... (Your secret)</td>
+              </tr>
+              <tr>
+                <td className="py-2.5 px-3 font-mono font-bold text-slate-800">ADMIN_USERNAME</td>
+                <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-bold">SECRETS / DEFAULT</span></td>
+                <td className="py-2.5 px-3 text-slate-600">Default admin username (sirf admin user create hoga, baki users admin dashboard se banaye ga)</td>
+                <td className="py-2.5 px-3 font-mono text-slate-500">admin</td>
+              </tr>
+              <tr>
+                <td className="py-2.5 px-3 font-mono font-bold text-slate-800">ADMIN_PASSWORDS</td>
+                <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-bold">SECRETS / DEFAULT</span></td>
+                <td className="py-2.5 px-3 text-slate-600">Admin password secrets se load hota hai aur startup par safely sync hota hai</td>
+                <td className="py-2.5 px-3 font-mono text-slate-500">admin123 (or your secret)</td>
               </tr>
               <tr>
                 <td className="py-2.5 px-3 font-mono font-bold text-slate-800">GitHub Actions MySQL</td>

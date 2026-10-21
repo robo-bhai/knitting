@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Quality Faults | TexFlow ERP{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex justify-between items-center">
+    <div>
+      <h1 class="text-lg font-bold text-slate-900">Knitting Faults & Defect Tracking (/faults)</h1>
+      <p class="text-xs text-slate-500 mt-1">Log fabric faults (holes, fly yarn, drop stitches, barre, needle lines).</p>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+      <h2 class="font-bold text-sm text-slate-900 mb-4 pb-2 border-b">Log Fabric Fault</h2>
+      <form method="POST" action="{{ url_for('faults') }}" class="space-y-3.5">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Machine *</label>
+          <input type="text" name="machine" required placeholder="M-03" class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Defect / Fault Code *</label>
+          <select name="code" class="w-full px-3 py-2 border rounded-lg text-xs bg-white">
+            <option value="Drop Stitch">Drop Stitch</option>
+            <option value="Needle Line">Needle Line</option>
+            <option value="Oil Stain">Oil Stain</option>
+            <option value="Lycra Missing / Cut">Lycra Missing / Cut</option>
+            <option value="Barre Mark">Barre Mark</option>
+            <option value="Fly Yarn / Contamination">Fly Yarn / Contamination</option>
+            <option value="Hole / Ladder">Hole / Ladder</option>
+          </select>
+        </div>
+        <button type="submit" class="w-full py-2 bg-slate-900 text-white rounded-lg text-xs font-bold uppercase">
+          Save Defect Log
+        </button>
+      </form>
+    </div>
+
+    <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+      <h2 class="font-bold text-sm text-slate-900 mb-3 pb-2 border-b">Recent Defect Logs</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-50 text-slate-600 uppercase text-[10px] font-semibold border-b">
+            <tr>
+              <th class="p-2.5">Machine</th>
+              <th class="p-2.5">Fault Description</th>
+              <th class="p-2.5">Status</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {% if logs and logs|length > 0 %}
+              {% for l in logs %}
+              <tr>
+                <td class="p-2.5 font-bold font-mono">{{ l['machine'] }}</td>
+                <td class="p-2.5 text-rose-700 font-medium">{{ l['code'] }}</td>
+                <td class="p-2.5"><span class="px-2 py-0.5 rounded text-[10px] bg-rose-50 text-rose-800 font-bold">Investigating</span></td>
+              </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="3" class="py-8 text-center text-slate-400">Zero active fabric defects logged today.</td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -3,19 +3,36 @@
 
 {% block content %}
 <div class="space-y-6">
-  <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-    <h1 class="text-lg font-bold text-slate-900">Knitting Machine Sign-In (/machine-sign)</h1>
-    <p class="text-xs text-slate-500 mt-1">Assigns machine to a Job ID and generates a unique 5-digit code scanned during Roll Entry.</p>
+  <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div>
+      <h1 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+        <i class="fa-solid fa-microchip text-emerald-600"></i>
+        Knitting Machine Sign-In (/machine-sign)
+      </h1>
+      <p class="text-xs text-slate-500 mt-1">
+        Assigns machine to a Job ID and generates a unique 5-digit security barcode scanned during Roll Entry.
+      </p>
+    </div>
+    <span class="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-800 text-xs font-semibold rounded-full border border-emerald-200">
+      <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+      Dual SQLite & MySQL Live Sync
+    </span>
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <!-- Form -->
     <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-      <h2 class="font-bold text-sm text-slate-900 mb-4 pb-2 border-b border-slate-100">Sign-In Form</h2>
-      <form action="{{ url_for('machine_sign') }}" method="POST" class="space-y-3.5">
+      <h2 class="font-bold text-sm text-slate-900 mb-4 pb-2 border-b border-slate-100 flex items-center justify-between">
+        <span>Machine Sign-In Form</span>
+        <span id="form_status_badge" class="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-normal">Ready</span>
+      </h2>
+      <form action="{{ url_for('machine_sign') }}" method="POST" class="space-y-3.5" id="machineSignForm">
+        <!-- Work Order -->
         <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">Work Order</label>
-          <select id="wo_select" name="work_order" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono bg-white">
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            Work Order <span class="text-rose-500">*</span>
+          </label>
+          <select id="wo_select" name="work_order" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none">
             <option value="">-- Choose Work Order --</option>
             {% for wo in work_orders %}
               <option value="{{ wo['work_order'] }}">{{ wo['work_order'] }}</option>
@@ -23,16 +40,37 @@
           </select>
         </div>
 
+        <!-- Fabric Shade -->
         <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">Fabric Shade</label>
-          <select id="shade_select" required class="w-full px-3 py-2 border rounded-lg text-xs bg-white">
-            <option value="">-- Choose Shade --</option>
-          </select>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-semibold text-slate-700">
+              Fabric Shade <span class="text-rose-500">*</span>
+            </label>
+            <button type="button" id="toggle_custom_shade_btn" class="text-[11px] text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-1">
+              <i class="fa-solid fa-pen-to-square"></i> <span id="custom_toggle_text">Custom Shade</span>
+            </button>
+          </div>
+
+          <!-- Dropdown Select -->
+          <div id="shade_select_wrapper">
+            <select id="shade_select" name="shade" required class="w-full px-3 py-2 border rounded-lg text-xs bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+              <option value="">-- Choose Shade --</option>
+            </select>
+          </div>
+
+          <!-- Custom Shade Input (Toggled) -->
+          <div id="custom_shade_wrapper" class="hidden mt-1.5 space-y-1">
+            <input type="text" id="custom_shade_input" placeholder="e.g. Navy Blue, Heather Grey, Bottle Green..." class="w-full px-3 py-2 border border-emerald-400 rounded-lg text-xs bg-emerald-50/40 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+            <p class="text-[10px] text-slate-500">New shade will be auto-linked to this Work Order.</p>
+          </div>
         </div>
 
+        <!-- Job ID -->
         <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">Job ID</label>
-          <select id="job_select" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono bg-white">
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            Job ID <span class="text-rose-500">*</span>
+          </label>
+          <select id="job_select" name="job_id" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none">
             <option value="">-- Job --</option>
           </select>
           <input type="hidden" name="job_text" id="job_text_input">
@@ -41,30 +79,82 @@
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-xs font-semibold text-slate-700 mb-1">Needles Spec</label>
-            <input type="text" name="needles" id="needles_input" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase bg-slate-50">
+            <input type="text" name="needles" id="needles_input" value="24N" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase bg-slate-50 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
           </div>
           <div>
             <label class="block text-xs font-semibold text-slate-700 mb-1">Machine No</label>
-            <input type="text" name="machine" required placeholder="e.g. M-01" class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase">
+            <input type="text" name="machine" required placeholder="e.g. M-01" class="w-full px-3 py-2 border rounded-lg text-xs font-mono uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-none">
           </div>
         </div>
 
         <div>
           <label class="block text-xs font-semibold text-slate-700 mb-1">Knitting Unit</label>
-          <input type="number" name="unit" value="1" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono">
+          <input type="number" name="unit" value="1" min="1" max="10" required class="w-full px-3 py-2 border rounded-lg text-xs font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none">
         </div>
 
-        <button type="submit" class="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold uppercase tracking-wider">
+        <div class="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-600 flex items-center justify-between">
+          <span class="text-slate-500">Full Job Ref:</span>
+          <span id="preview_job_text" class="font-mono font-bold text-slate-800">--/--</span>
+        </div>
+
+        <button type="submit" id="submit_btn" class="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-colors shadow-sm flex items-center justify-center gap-2">
+          <i class="fa-solid fa-barcode text-emerald-400"></i>
           Generate 5-Digit Unique Barcode
         </button>
       </form>
     </div>
 
     <!-- Live Machines Table -->
-    <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-      <h2 class="font-bold text-sm text-slate-900 mb-3 pb-2 border-b border-slate-100">Signed Machines for Work Order</h2>
-      <div id="machines_container" class="overflow-x-auto text-xs text-slate-500">
-        Select a Work Order above to fetch real-time assigned machines via /api/assignments-by-wo.
+    <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-3 border-b border-slate-100 gap-2">
+        <div>
+          <h2 class="font-bold text-sm text-slate-900 flex items-center gap-2">
+            <i class="fa-solid fa-list-check text-slate-600"></i>
+            Active Signed Machines
+          </h2>
+          <p class="text-xs text-slate-500" id="table_subtitle">Active machine assignments across all units</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <input type="text" id="table_search_input" placeholder="Search machine or job..." class="px-2.5 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 w-44">
+        </div>
+      </div>
+
+      <div id="machines_container" class="overflow-x-auto text-xs text-slate-500 flex-1">
+        {% if assignments and assignments|length > 0 %}
+          <table class="w-full text-left text-xs" id="active_machines_table">
+            <thead class="bg-slate-50 uppercase text-[10px] text-slate-600 border-b">
+              <tr>
+                <th class="p-2">5-Digit Code</th>
+                <th class="p-2">Machine</th>
+                <th class="p-2">Job Reference</th>
+                <th class="p-2">Needles</th>
+                <th class="p-2">Time</th>
+                <th class="p-2 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100" id="active_machines_tbody">
+              {% for m in assignments %}
+                <tr class="hover:bg-slate-50/80 transition-colors machine-row">
+                  <td class="p-2 font-mono font-bold text-emerald-800 bg-emerald-50 rounded">
+                    <span class="px-1.5 py-0.5 border border-emerald-200 rounded">{{ m['unique_code'] }}</span>
+                  </td>
+                  <td class="p-2 font-bold text-slate-900">{{ m['machine_no'] }} <span class="text-slate-400 font-normal text-[11px] font-mono">(Unit {{ m['unit_no'] }})</span></td>
+                  <td class="p-2 font-mono font-semibold text-slate-800">{{ m['job_full_text'] }}</td>
+                  <td class="p-2 font-mono text-slate-600">{{ m['needles'] }}</td>
+                  <td class="p-2 font-mono text-slate-400 text-[11px]">{{ m['created_at'] }}</td>
+                  <td class="p-2 text-right">
+                    <a href="{{ url_for('delete_machine_sign', id=m['id']) }}" onclick="return confirm('Sign out machine {{ m['machine_no'] }}?')" class="text-rose-600 hover:text-rose-800 font-semibold">Sign-Out</a>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="p-8 text-center text-slate-400">
+            <i class="fa-solid fa-circle-info text-slate-300 text-2xl mb-2 block"></i>
+            No active machine assignments yet. Select a Work Order to sign in a machine.
+          </div>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -75,61 +165,250 @@
 <script>
   const woSelect = document.getElementById('wo_select');
   const shadeSelect = document.getElementById('shade_select');
+  const shadeSelectWrapper = document.getElementById('shade_select_wrapper');
+  const customShadeWrapper = document.getElementById('custom_shade_wrapper');
+  const customShadeInput = document.getElementById('custom_shade_input');
+  const toggleCustomShadeBtn = document.getElementById('toggle_custom_shade_btn');
+  const customToggleText = document.getElementById('custom_toggle_text');
+  
   const jobSelect = document.getElementById('job_select');
   const jobTextInput = document.getElementById('job_text_input');
   const needlesInput = document.getElementById('needles_input');
+  const previewJobText = document.getElementById('preview_job_text');
   const machinesContainer = document.getElementById('machines_container');
+  const formStatusBadge = document.getElementById('form_status_badge');
+  const tableSubtitle = document.getElementById('table_subtitle');
+  const tableSearchInput = document.getElementById('table_search_input');
 
+  let isCustomShadeMode = false;
+
+  // Toggle between Dropdown and Custom Shade Input
+  toggleCustomShadeBtn.addEventListener('click', function() {
+    isCustomShadeMode = !isCustomShadeMode;
+    if (isCustomShadeMode) {
+      shadeSelectWrapper.classList.add('hidden');
+      customShadeWrapper.classList.remove('hidden');
+      customToggleText.innerText = 'Select Existing';
+      shadeSelect.removeAttribute('required');
+      customShadeInput.setAttribute('required', 'required');
+      customShadeInput.focus();
+    } else {
+      shadeSelectWrapper.classList.remove('hidden');
+      customShadeWrapper.classList.add('hidden');
+      customToggleText.innerText = 'Custom Shade';
+      shadeSelect.setAttribute('required', 'required');
+      customShadeInput.removeAttribute('required');
+      if (shadeSelect.value) {
+        handleShadeSelected(shadeSelect.value);
+      }
+    }
+  });
+
+  // Custom shade text change
+  customShadeInput.addEventListener('input', function() {
+    const val = this.value.trim();
+    if (val) {
+      handleShadeSelected(val);
+    }
+  });
+
+  // Work Order Change
   woSelect.addEventListener('change', async function() {
     const wo = this.value;
-    if (!wo) return;
-
-    // 1. Fetch shades
-    const res = await fetch('/api/shades-by-wo/' + encodeURIComponent(wo));
-    const shades = await res.json();
-    shadeSelect.innerHTML = '<option value="">-- Choose Shade --</option>';
-    shades.forEach(s => shadeSelect.innerHTML += \`<option value="\${s}">\${s}</option>\`);
-
-    // 2. Fetch assigned machines
-    const mRes = await fetch('/api/assignments-by-wo/' + encodeURIComponent(wo));
-    const assignments = await mRes.json();
-    renderAssignments(assignments);
-  });
-
-  shadeSelect.addEventListener('change', async function() {
-    const wo = woSelect.value;
-    const shade = this.value;
-    if (!wo || !shade) return;
-
-    const res = await fetch(\`/api/jobs-by-shade/\${encodeURIComponent(wo)}/\${encodeURIComponent(shade)}\`);
-    const jobs = await res.json();
-    jobSelect.innerHTML = '<option value="">-- Job --</option>';
-    jobs.forEach(j => {
-      jobSelect.innerHTML += \`<option value="\${j.job}" data-needles="\${j.needles_ref}">Job #\${j.job} (\${j.needles_ref})</option>\`;
-    });
-  });
-
-  jobSelect.addEventListener('change', function() {
-    const selected = this.options[this.selectedIndex];
-    const jobId = this.value;
-    const wo = woSelect.value;
-    if (jobId && wo) {
-      jobTextInput.value = \`\${jobId}/\${wo}\`;
-      needlesInput.value = selected.getAttribute('data-needles') || '';
-    }
-  });
-
-  function renderAssignments(list) {
-    if (list.length === 0) {
-      machinesContainer.innerHTML = '<p class="p-4 text-center text-slate-400">No machines signed in for this Work Order.</p>';
+    if (!wo) {
+      shadeSelect.innerHTML = '<option value="">-- Choose Shade --</option>';
+      jobSelect.innerHTML = '<option value="">-- Job --</option>';
+      jobTextInput.value = '';
+      previewJobText.innerText = '--/--';
+      formStatusBadge.innerText = 'Select WO';
       return;
     }
-    let html = '<table class="w-full text-left text-xs"><thead class="bg-slate-50 uppercase text-[10px] border-b"><tr><th class="p-2">Code</th><th class="p-2">Machine</th><th class="p-2">Job</th><th class="p-2">Needles</th><th class="p-2 text-right">Action</th></tr></thead><tbody class="divide-y">';
+
+    formStatusBadge.innerText = 'Loading shades...';
+    formStatusBadge.className = 'text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-normal';
+
+    // 1. Fetch shades with fallback query params
+    try {
+      let res = await fetch('/api/shades-by-wo?wo=' + encodeURIComponent(wo));
+      if (!res.ok) {
+        res = await fetch('/api/shades-by-wo/' + encodeURIComponent(wo));
+      }
+      const shades = await res.json();
+      
+      shadeSelect.innerHTML = '<option value="">-- Choose Shade --</option>';
+      if (Array.isArray(shades) && shades.length > 0) {
+        shades.forEach(s => {
+          if (s) {
+            shadeSelect.innerHTML += `<option value="${s}">${s}</option>`;
+          }
+        });
+        formStatusBadge.innerText = `${shades.length} shades loaded`;
+        formStatusBadge.className = 'text-[10px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-normal';
+        
+        // Auto-select first shade for fast workflow
+        if (shadeSelect.options.length > 1) {
+          shadeSelect.selectedIndex = 1;
+          handleShadeSelected(shadeSelect.value);
+        }
+      } else {
+        formStatusBadge.innerText = 'Type custom shade';
+        formStatusBadge.className = 'text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-normal';
+      }
+    } catch (err) {
+      console.warn('Error fetching shades:', err);
+      formStatusBadge.innerText = 'Fallback shades active';
+      formStatusBadge.className = 'text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-normal';
+      const fallbacks = ["Raw White", "Bleach White", "Jet Black", "Navy Blue", "Heather Grey", "Olive Green"];
+      shadeSelect.innerHTML = '<option value="">-- Choose Shade --</option>';
+      fallbacks.forEach(s => shadeSelect.innerHTML += `<option value="${s}">${s}</option>`);
+      if (shadeSelect.options.length > 1) {
+        shadeSelect.selectedIndex = 1;
+        handleShadeSelected(shadeSelect.value);
+      }
+    }
+
+    // 2. Fetch assigned machines for this WO
+    try {
+      tableSubtitle.innerText = `Active machines for Work Order: ${wo}`;
+      let mRes = await fetch('/api/assignments-by-wo?wo=' + encodeURIComponent(wo));
+      if (!mRes.ok) {
+        mRes = await fetch('/api/assignments-by-wo/' + encodeURIComponent(wo));
+      }
+      if (mRes.ok) {
+        const assignments = await mRes.json();
+        renderAssignments(assignments);
+      }
+    } catch (err) {
+      console.warn('Error fetching assignments:', err);
+    }
+  });
+
+  // Shade Dropdown Change
+  shadeSelect.addEventListener('change', function() {
+    handleShadeSelected(this.value);
+  });
+
+  // Unified Handler when Shade is selected or typed
+  async function handleShadeSelected(shade) {
+    const wo = woSelect.value;
+    if (!wo || !shade) return;
+
+    jobSelect.innerHTML = '<option value="">Loading jobs...</option>';
+
+    try {
+      let res = await fetch(`/api/jobs-by-shade?wo=${encodeURIComponent(wo)}&shade=${encodeURIComponent(shade)}`);
+      if (!res.ok) {
+        res = await fetch(`/api/jobs-by-shade/${encodeURIComponent(wo)}/${encodeURIComponent(shade)}`);
+      }
+      const jobs = await res.json();
+      
+      jobSelect.innerHTML = '';
+      if (Array.isArray(jobs) && jobs.length > 0) {
+        jobs.forEach(j => {
+          const jNum = j.job || 1;
+          const needlesSpec = j.needles_ref || '24N';
+          jobSelect.innerHTML += `<option value="${jNum}" data-needles="${needlesSpec}">Job #${jNum} (${needlesSpec})</option>`;
+        });
+      } else {
+        jobSelect.innerHTML = '<option value="1" data-needles="24N">Job #1 (24N Standard)</option>';
+      }
+
+      // Auto-trigger first job selection
+      updateSelectedJob();
+    } catch (err) {
+      console.warn('Error fetching jobs:', err);
+      jobSelect.innerHTML = '<option value="1" data-needles="24N">Job #1 (24N)</option>';
+      updateSelectedJob();
+    }
+  }
+
+  // Job selection change
+  jobSelect.addEventListener('change', updateSelectedJob);
+
+  function updateSelectedJob() {
+    const wo = woSelect.value;
+    const selected = jobSelect.options[jobSelect.selectedIndex];
+    const jobId = jobSelect.value || '1';
+    
+    if (selected) {
+      const needles = selected.getAttribute('data-needles');
+      if (needles) {
+        needlesInput.value = needles;
+      }
+    }
+
+    if (wo) {
+      const fullText = `${jobId}/${wo}`;
+      jobTextInput.value = fullText;
+      previewJobText.innerText = fullText;
+    } else {
+      jobTextInput.value = `Job-${jobId}`;
+      previewJobText.innerText = `Job-${jobId}`;
+    }
+  }
+
+  // Form submit safeguard
+  document.getElementById('machineSignForm').addEventListener('submit', function(e) {
+    const wo = woSelect.value;
+    const jobId = jobSelect.value || '1';
+    if (!jobTextInput.value && wo) {
+      jobTextInput.value = `${jobId}/${wo}`;
+    }
+    // If custom shade is active, ensure shade select gets its value
+    if (isCustomShadeMode && customShadeInput.value.trim()) {
+      let opt = Array.from(shadeSelect.options).find(o => o.value === customShadeInput.value.trim());
+      if (!opt) {
+        opt = document.createElement('option');
+        opt.value = customShadeInput.value.trim();
+        opt.text = customShadeInput.value.trim();
+        shadeSelect.appendChild(opt);
+      }
+      shadeSelect.value = customShadeInput.value.trim();
+    }
+  });
+
+  // Render Table
+  function renderAssignments(list) {
+    if (!Array.isArray(list) || list.length === 0) {
+      machinesContainer.innerHTML = '<div class="p-8 text-center text-slate-400"><i class="fa-solid fa-circle-info text-slate-300 text-2xl mb-2 block"></i>No machines currently signed in for this Work Order.</div>';
+      return;
+    }
+    let html = '<table class="w-full text-left text-xs" id="active_machines_table"><thead class="bg-slate-50 uppercase text-[10px] text-slate-600 border-b"><tr><th class="p-2">5-Digit Code</th><th class="p-2">Machine</th><th class="p-2">Job Reference</th><th class="p-2">Needles</th><th class="p-2">Time</th><th class="p-2 text-right">Action</th></tr></thead><tbody class="divide-y divide-slate-100" id="active_machines_tbody">';
     list.forEach(m => {
-      html += \`<tr class="hover:bg-slate-50"><td class="p-2 font-mono font-bold text-emerald-700 bg-emerald-50">\${m.unique_code}</td><td class="p-2 font-bold">\${m.machine_no} (Unit \${m.unit_no})</td><td class="p-2 font-mono">\${m.job_full_text}</td><td class="p-2 font-mono">\${m.needles}</td><td class="p-2 text-right"><a href="/machine-sign/delete/\${m.id}" class="text-rose-600 hover:underline">Sign-Out</a></td></tr>\`;
+      html += `<tr class="hover:bg-slate-50/80 transition-colors machine-row">
+        <td class="p-2 font-mono font-bold text-emerald-800 bg-emerald-50 rounded">
+          <span class="px-1.5 py-0.5 border border-emerald-200 rounded">${m.unique_code}</span>
+        </td>
+        <td class="p-2 font-bold text-slate-900">${m.machine_no} <span class="text-slate-400 font-normal text-[11px] font-mono">(Unit ${m.unit_no})</span></td>
+        <td class="p-2 font-mono font-semibold text-slate-800">${m.job_full_text}</td>
+        <td class="p-2 font-mono text-slate-600">${m.needles}</td>
+        <td class="p-2 font-mono text-slate-400 text-[11px]">${m.created_at || ''}</td>
+        <td class="p-2 text-right">
+          <a href="/machine-sign/delete/${m.id}" onclick="return confirm('Sign out machine ${m.machine_no}?')" class="text-rose-600 hover:text-rose-800 font-semibold">Sign-Out</a>
+        </td>
+      </tr>`;
     });
     html += '</tbody></table>';
     machinesContainer.innerHTML = html;
   }
+
+  // Client search filter on table
+  if (tableSearchInput) {
+    tableSearchInput.addEventListener('input', function() {
+      const q = this.value.toLowerCase().trim();
+      const rows = document.querySelectorAll('.machine-row');
+      rows.forEach(r => {
+        const text = r.innerText.toLowerCase();
+        r.style.display = text.includes(q) ? '' : 'none';
+      });
+    });
+  }
+
+  // Trigger load on startup if WO is selected
+  window.addEventListener('DOMContentLoaded', () => {
+    if (woSelect.value) {
+      woSelect.dispatchEvent(new Event('change'));
+    }
+  });
 </script>
 {% endblock %}

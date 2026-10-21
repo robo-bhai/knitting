@@ -434,8 +434,8 @@ export const JINJA_TEMPLATES: JinjaTemplateFile[] = [
     path: "templates/machine_sign.html",
     title: "Machine Sign-In (machine_sign.html)",
     route: "/machine-sign",
-    description: "Machine Sign-In module generating 5-digit unique code, cascading Work Order -> Shade -> Job selection, and sign-out records.",
-    flaskContext: ["work_orders: list"],
+    description: "Machine Sign-In module generating 5-digit unique code, cascading Work Order -> Shade -> Job selection with custom shade fallback, and sign-out records.",
+    flaskContext: ["work_orders: list", "assignments: list"],
     code: `{% extends "base.html" %}
 {% block title %}Machine Sign-In & 5-Digit Barcode Generator | TexFlow ERP{% endblock %}
 

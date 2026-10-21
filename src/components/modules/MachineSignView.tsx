@@ -1,84 +1,144 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { Cpu, QrCode, Trash2, Search, CheckCircle2, AlertCircle, Hash, RefreshCw } from 'lucide-react';
+import { Cpu, QrCode, Trash2, Search, CheckCircle2, AlertCircle, Hash, RefreshCw, PenLine } from 'lucide-react';
 
 export const MachineSignView: React.FC = () => {
   const {
-    workOrders, bags, jobs, machineAssignments,
+    workOrders, plans, bags, jobs, machineAssignments,
     assignMachine, deleteMachineAssignment
   } = useApp();
 
   // Form selections
   const [selectedWo, setSelectedWo] = useState<string>(workOrders[0]?.work_order || '');
   const [selectedShade, setSelectedShade] = useState<string>('');
-  const [selectedJob, setSelectedJob] = useState<string>('');
-  const [needles, setNeedles] = useState<string>('');
-  const [machineNo, setMachineNo] = useState<string>('M-02');
+  const [isCustomShade, setIsCustomShade] = useState<boolean>(false);
+  const [customShade, setCustomShade] = useState<string>('');
+  const [selectedJob, setSelectedJob] = useState<string>('1');
+  const [needles, setNeedles] = useState<string>('24N');
+  const [machineNo, setMachineNo] = useState<string>('M-01');
   const [unitNo, setUnitNo] = useState<number>(1);
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
 
-  // Search filter for View Barcode tab
+  // Search filter for table
   const [searchWo, setSearchWo] = useState<string>('');
 
-  // Dynamic Shades available for selected Work Order
-  // Matches /api/shades-by-wo/<wo_name>
+  // 1. Dynamic Shades available for selected Work Order
+  const currentWoObj = workOrders.find(w => w.work_order === selectedWo);
+  const woPlanIds = currentWoObj 
+    ? plans.filter(p => p.work_order_id === currentWoObj.id).map(p => p.id)
+    : [];
+
+  const shadesFromBags = bags
+    .filter(b => woPlanIds.includes(b.plan_id))
+    .map(b => b.shade)
+    .filter(Boolean);
+
+  const shadesFromJobs = jobs
+    .filter(j => j.work_order_ref === selectedWo)
+    .map(j => j.shade_ref)
+    .filter(Boolean);
+
+  const allBagsShades = bags.map(b => b.shade).filter(Boolean);
+
+  const baselineShades = [
+    'Raw White', 'Bleach White', 'Jet Black', 'Navy Blue', 
+    'Heather Grey', 'Charcoal Melange', 'Olive Green', 
+    'Royal Blue', 'Maroon', 'Red', 'Beige', 'Bottle Green'
+  ];
+
   const availableShades = Array.from(
-    new Set(
-      bags
-        .filter(b => {
-          // find wo for bag
-          return true; // Simplified or join through plans
-        })
-        .map(b => b.shade)
-    )
+    new Set([
+      ...shadesFromBags,
+      ...shadesFromJobs,
+      ...(shadesFromBags.length === 0 && shadesFromJobs.length === 0 ? allBagsShades : []),
+      ...baselineShades
+    ])
   );
 
+  // Auto-initialize selected shade when WO changes or on first load
+  useEffect(() => {
+    if (!selectedShade && availableShades.length > 0) {
+      const initial = shadesFromBags[0] || shadesFromJobs[0] || availableShades[0];
+      setSelectedShade(initial);
+      updateJobAndNeedles(selectedWo, initial);
+    }
+  }, [selectedWo, availableShades.length]);
+
   // Dynamic Jobs for selected WO & Shade
-  // Matches /api/jobs-by-shade/<wo_name>/<shade_name>
-  const availableJobs = jobs.filter(
+  const effectiveShade = isCustomShade ? customShade.trim() : selectedShade;
+  const matchingJobs = jobs.filter(
     j => (!selectedWo || j.work_order_ref === selectedWo) &&
-         (!selectedShade || j.shade_ref === selectedShade)
+         (!effectiveShade || j.shade_ref.toLowerCase() === effectiveShade.toLowerCase())
   );
+
+  const displayJobs = matchingJobs.length > 0 
+    ? matchingJobs 
+    : [{ id: 9999, job: 1, work_order_ref: selectedWo, shade_ref: effectiveShade || 'Standard', needles_ref: needles || '24N' }];
+
+  const updateJobAndNeedles = (wo: string, shade: string) => {
+    const foundJob = jobs.find(
+      j => j.work_order_ref === wo && j.shade_ref.toLowerCase() === shade.toLowerCase()
+    );
+    if (foundJob) {
+      setSelectedJob(foundJob.job.toString());
+      setNeedles(foundJob.needles_ref || '24N');
+    } else {
+      setSelectedJob('1');
+      if (!needles) setNeedles('24N');
+    }
+  };
 
   const handleWoChange = (wo: string) => {
     setSelectedWo(wo);
-    setSelectedShade('');
-    setSelectedJob('');
-    setNeedles('');
+    const newShades = Array.from(
+      new Set([
+        ...bags.filter(b => {
+          const wObj = workOrders.find(w => w.work_order === wo);
+          return wObj ? plans.some(p => p.work_order_id === wObj.id && p.id === b.plan_id) : false;
+        }).map(b => b.shade),
+        ...jobs.filter(j => j.work_order_ref === wo).map(j => j.shade_ref),
+        ...baselineShades
+      ])
+    ).filter(Boolean);
+
+    const firstShade = newShades[0] || 'Navy Blue';
+    setSelectedShade(firstShade);
+    updateJobAndNeedles(wo, firstShade);
   };
 
   const handleShadeChange = (shade: string) => {
     setSelectedShade(shade);
-    const matchingJob = jobs.find(j => j.work_order_ref === selectedWo && j.shade_ref === shade);
-    if (matchingJob) {
-      setSelectedJob(matchingJob.job.toString());
-      setNeedles(matchingJob.needles_ref);
-    } else {
-      setSelectedJob('');
-      setNeedles('');
-    }
+    setIsCustomShade(false);
+    updateJobAndNeedles(selectedWo, shade);
+  };
+
+  const handleCustomShadeChange = (shade: string) => {
+    setCustomShade(shade);
+    updateJobAndNeedles(selectedWo, shade);
   };
 
   const handleJobChange = (jobIdStr: string) => {
     setSelectedJob(jobIdStr);
-    const j = jobs.find(job => job.work_order_ref === selectedWo && job.job.toString() === jobIdStr);
-    if (j) {
+    const j = displayJobs.find(job => job.job.toString() === jobIdStr);
+    if (j && j.needles_ref) {
       setNeedles(j.needles_ref);
     }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedWo || !selectedJob || !machineNo.trim()) return;
+    const finalShade = isCustomShade ? customShade.trim() : selectedShade;
+    if (!selectedWo || !finalShade || !machineNo.trim()) return;
 
-    const jobFullText = `${selectedJob}/${selectedWo}`;
+    const jId = selectedJob || '1';
+    const jobFullText = `${jId}/${selectedWo}`;
     const code = assignMachine(jobFullText, needles || '24N', machineNo.trim().toUpperCase(), unitNo);
     setGeneratedCode(code);
   };
 
   const filteredAssignments = searchWo.trim()
     ? machineAssignments.filter(m => m.job_full_text.toLowerCase().includes(searchWo.toLowerCase()) || m.machine_no.toLowerCase().includes(searchWo.toLowerCase()))
-    : machineAssignments;
+    : (selectedWo ? machineAssignments.filter(m => m.job_full_text.includes(selectedWo)) : machineAssignments);
 
   return (
     <div className="space-y-6">
@@ -108,15 +168,22 @@ export const MachineSignView: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Sign-In Form (machine_sign.html) */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-          <h2 className="font-bold text-sm text-slate-900 mb-4 pb-2 border-b border-slate-100 flex items-center gap-2">
-            <QrCode className="w-4 h-4 text-emerald-600" />
-            Sign-In Machine to Job
+          <h2 className="font-bold text-sm text-slate-900 mb-4 pb-2 border-b border-slate-100 flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <QrCode className="w-4 h-4 text-emerald-600" />
+              Sign-In Machine to Job
+            </span>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium">
+              Live Ready
+            </span>
           </h2>
 
           <form onSubmit={handleSubmit} className="space-y-3.5">
             {/* Work Order */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Select Work Order</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Select Work Order <span className="text-rose-500">*</span>
+              </label>
               <select
                 required
                 value={selectedWo}
@@ -132,38 +199,63 @@ export const MachineSignView: React.FC = () => {
               </select>
             </div>
 
-            {/* Shade Selection (Dynamic API) */}
+            {/* Shade Selection (Dynamic with custom option) */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Select Fabric Shade</label>
-              <select
-                required
-                value={selectedShade}
-                onChange={e => handleShadeChange(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-              >
-                <option value="">-- Choose Shade --</option>
-                {availableShades.map(shade => (
-                  <option key={shade} value={shade}>
-                    {shade}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-700">
+                  Select Fabric Shade <span className="text-rose-500">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIsCustomShade(!isCustomShade)}
+                  className="text-[11px] text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-1 cursor-pointer"
+                >
+                  <PenLine className="w-3 h-3" />
+                  {isCustomShade ? 'Select From List' : '+ Custom Shade'}
+                </button>
+              </div>
+
+              {!isCustomShade ? (
+                <select
+                  required
+                  value={selectedShade}
+                  onChange={e => handleShadeChange(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                >
+                  <option value="">-- Choose Shade --</option>
+                  {availableShades.map(shade => (
+                    <option key={shade} value={shade}>
+                      {shade}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Olive Green, Bottle Green, Sky Blue..."
+                  value={customShade}
+                  onChange={e => handleCustomShadeChange(e.target.value)}
+                  className="w-full px-3 py-2 border border-emerald-400 bg-emerald-50/30 rounded-lg text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                />
+              )}
             </div>
 
             {/* Job & Needles */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Job ID</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Job ID <span className="text-rose-500">*</span>
+                </label>
                 <select
                   required
                   value={selectedJob}
                   onChange={e => handleJobChange(e.target.value)}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
                 >
-                  <option value="">-- Job --</option>
-                  {availableJobs.map(j => (
-                    <option key={j.id} value={j.job}>
-                      Job #{j.job}
+                  {displayJobs.map(j => (
+                    <option key={j.id} value={j.job.toString()}>
+                      Job #{j.job} {j.needles_ref ? `(${j.needles_ref})` : ''}
                     </option>
                   ))}
                 </select>
@@ -173,6 +265,7 @@ export const MachineSignView: React.FC = () => {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Needles Spec</label>
                 <input
                   type="text"
+                  required
                   placeholder="e.g. 24N"
                   value={needles}
                   onChange={e => setNeedles(e.target.value)}
@@ -184,7 +277,9 @@ export const MachineSignView: React.FC = () => {
             {/* Machine Number & Unit */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Machine No</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Machine No <span className="text-rose-500">*</span>
+                </label>
                 <input
                   type="text"
                   required
@@ -212,13 +307,13 @@ export const MachineSignView: React.FC = () => {
             <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-[11px] text-slate-600 flex items-start gap-2">
               <AlertCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
               <span>
-                Full Job Text will be saved as: <strong className="font-mono text-slate-900">{selectedJob ? `${selectedJob}/${selectedWo}` : 'Job#/WO'}</strong>
+                Full Job Reference: <strong className="font-mono text-slate-900">{selectedJob ? `${selectedJob}/${selectedWo}` : 'Job#/WO'}</strong>
               </span>
             </div>
 
             <button
               type="submit"
-              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-colors"
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-colors cursor-pointer"
             >
               <Cpu className="w-4 h-4 text-emerald-400" />
               Generate 5-Digit Machine Barcode
@@ -231,7 +326,9 @@ export const MachineSignView: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-3 border-b border-slate-100 gap-3">
             <div>
               <h2 className="font-bold text-sm text-slate-900">Signed-In Machines & Barcodes</h2>
-              <p className="text-xs text-slate-500">Live active machine allocations across all units</p>
+              <p className="text-xs text-slate-500">
+                {selectedWo ? `Showing machines for ${selectedWo}` : 'Live active machine allocations across all units'}
+              </p>
             </div>
 
             <div className="relative">
@@ -249,7 +346,7 @@ export const MachineSignView: React.FC = () => {
           <div className="overflow-x-auto flex-1">
             {filteredAssignments.length === 0 ? (
               <div className="p-8 text-center text-slate-400 text-xs">
-                No active machine assignments found.
+                No active machine assignments found for this filter.
               </div>
             ) : (
               <table className="w-full text-left text-xs">
@@ -289,7 +386,7 @@ export const MachineSignView: React.FC = () => {
                           onClick={() => {
                             if (confirm(`Sign out machine ${m.machine_no}?`)) deleteMachineAssignment(m.id);
                           }}
-                          className="px-2 py-1 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded text-[11px] font-medium transition-colors"
+                          className="px-2 py-1 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded text-[11px] font-medium transition-colors cursor-pointer"
                           title="Sign Out / Delete"
                         >
                           Sign-Out

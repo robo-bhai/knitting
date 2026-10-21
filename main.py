@@ -6,6 +6,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 import os, sys, time, random, string, io
 from datetime import datetime
 from functools import wraps
+from urllib.parse import unquote
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -960,10 +961,43 @@ def update_lot_qty(id):
 def machine_sign():
     con = db(); cur = con.cursor()
     if request.method == "POST":
-        job_text = request.form.get("job_text")
-        needles = request.form.get("needles")
-        machine = request.form.get("machine")
+        job_text = (request.form.get("job_text") or "").strip()
+        work_order = (request.form.get("work_order") or "").strip()
+        shade = (request.form.get("shade") or "").strip()
+        job_id = (request.form.get("job_id") or "").strip()
+        needles = (request.form.get("needles") or "24N").strip()
+        machine = (request.form.get("machine") or "").strip()
         unit = request.form.get("unit", 1)
+
+        # Build fallback job_text if client JS did not compose it
+        if not job_text:
+            j_clean = job_id if job_id else "1"
+            if work_order:
+                job_text = f"{j_clean}/{work_order}"
+            else:
+                job_text = f"Job-{j_clean}"
+
+        # Ensure Job record exists in jobs table so Roll Entry finds it without failing
+        if work_order and shade:
+            try:
+                cur.execute("""
+                    SELECT id FROM jobs 
+                    WHERE LOWER(TRIM(work_order_ref)) = LOWER(TRIM(?)) 
+                      AND LOWER(TRIM(shade_ref)) = LOWER(TRIM(?)) 
+                      AND LOWER(TRIM(needles_ref)) = LOWER(TRIM(?))
+                """, (work_order, shade, needles))
+                if not cur.fetchone():
+                    try:
+                        j_num = int(job_id) if job_id.isdigit() else 1
+                    except Exception:
+                        j_num = 1
+                    cur.execute("""
+                        INSERT INTO jobs (job, work_order_ref, shade_ref, needles_ref)
+                        VALUES (?, ?, ?, ?)
+                    """, (j_num, work_order, shade, needles))
+                    con.commit()
+            except Exception as e:
+                print(f"[WARN] Error ensuring jobs record: {e}")
 
         while True:
             code = ''.join(random.choices(string.digits, k=5))
@@ -977,13 +1011,17 @@ def machine_sign():
             VALUES (?, ?, ?, ?, ?, ?)
         """, (job_text, needles, machine, unit, code, datetime.now().strftime("%Y-%m-%d %H:%M")))
         con.commit()
-        flash(f"Machine M#{machine} assigned to {job_text}. Code: {code}", "success")
+        flash(f"Machine M#{machine} assigned to {job_text}. 5-Digit Barcode: {code}", "success")
+        con.close()
         return redirect(url_for("machine_sign"))
 
     cur.execute("SELECT DISTINCT work_order FROM work_orders ORDER BY work_order DESC")
     work_orders = cur.fetchall()
+
+    cur.execute("SELECT * FROM machine_assignments ORDER BY id DESC LIMIT 50")
+    recent_assignments = cur.fetchall()
     con.close()
-    return render_template("machine_sign.html", work_orders=work_orders)
+    return render_template("machine_sign.html", work_orders=work_orders, assignments=recent_assignments)
 
 @app.route("/machine-sign/delete/<int:id>")
 def delete_machine_sign(id):
@@ -1003,34 +1041,37 @@ def roll_entry():
     con.close()
     return render_template("roll_entry_select.html", work_orders=work_orders)
 
-@app.route("/api/plans/<work_order>")
+@app.route("/api/plans/<path:work_order>")
 def api_plans(work_order):
+    work_order = unquote(work_order).strip()
     con = db(); cur = con.cursor()
     cur.execute("""
         SELECT plans.plan_id FROM plans
         JOIN work_orders ON plans.work_order_id=work_orders.id
-        WHERE work_orders.work_order=?
+        WHERE LOWER(TRIM(work_orders.work_order))=LOWER(TRIM(?))
     """, (work_order,))
     data = [p["plan_id"] for p in cur.fetchall()]
     con.close()
     return jsonify(data)
 
-@app.route("/api/bags/<plan_id>")
+@app.route("/api/bags/<path:plan_id>")
 def api_bags(plan_id):
+    plan_id = unquote(plan_id).strip()
     con = db(); cur = con.cursor()
     cur.execute("""
         SELECT b.bag_number 
         FROM bags b
         JOIN plans p ON b.plan_id = p.id
         LEFT JOIN finalized_bags fb ON b.bag_number = fb.bag_number
-        WHERE p.plan_id = ? AND fb.bag_number IS NULL
+        WHERE LOWER(TRIM(p.plan_id)) = LOWER(TRIM(?)) AND fb.bag_number IS NULL
     """, (plan_id,))
     data = [b["bag_number"] for b in cur.fetchall()]
     con.close()
     return jsonify(data)
 
-@app.route("/api/lots/<bag_number>")
+@app.route("/api/lots/<path:bag_number>")
 def api_lots(bag_number):
+    bag_number = unquote(bag_number).strip()
     con = db(); cur = con.cursor()
     cur.execute("""
         SELECT 
@@ -1045,7 +1086,7 @@ def api_lots(bag_number):
         JOIN bags b ON l.bag_id = b.id
         LEFT JOIN fabric_rolls fr ON (fr.bag_number = b.bag_number AND fr.lot_name = l.lot_name)
         LEFT JOIN machine_assignments m ON fr.barcode_used = m.unique_code
-        WHERE b.bag_number = ?
+        WHERE LOWER(TRIM(b.bag_number)) = LOWER(TRIM(?))
         GROUP BY l.lot_name, fr.barcode_used, l.needles, l.fabric_weight, m.machine_no, b.bag_number
     """, (bag_number,))
     rows = cur.fetchall()
@@ -1064,29 +1105,171 @@ def api_lots(bag_number):
     con.close()
     return jsonify(data)
 
-@app.route("/api/shades-by-wo/<wo_name>")
-def shades_by_wo(wo_name):
+@app.route("/api/shades-by-wo")
+@app.route("/api/shades-by-wo/<path:wo_name>")
+def shades_by_wo(wo_name=None):
+    if not wo_name:
+        wo_name = request.args.get("wo") or request.args.get("work_order") or ""
+    wo_name = unquote(wo_name).strip() if wo_name else ""
+
     con = db(); cur = con.cursor()
-    cur.execute("""
-        SELECT DISTINCT b.shade FROM bags b
-        JOIN plans p ON b.plan_id = p.id
-        JOIN work_orders wo ON p.work_order_id = wo.id
-        WHERE wo.work_order = ?
-    """, (wo_name,))
-    data = [r['shade'] for r in cur.fetchall()]
+    shades = []
+    seen = set()
+
+    def add_shade(val):
+        if val is not None:
+            s = str(val).strip()
+            if s and s.lower() not in ('none', 'null', '') and s.lower() not in seen:
+                seen.add(s.lower())
+                shades.append(s)
+
+    if wo_name:
+        # 1. Look up shades in bags for this Work Order
+        try:
+            cur.execute("""
+                SELECT DISTINCT b.shade FROM bags b
+                JOIN plans p ON b.plan_id = p.id
+                JOIN work_orders wo ON p.work_order_id = wo.id
+                WHERE LOWER(TRIM(wo.work_order)) = LOWER(TRIM(?))
+            """, (wo_name,))
+            for r in cur.fetchall():
+                val = r['shade'] if isinstance(r, dict) or hasattr(r, '__getitem__') else r[0]
+                add_shade(val)
+        except Exception as e:
+            print(f"[WARN] bags shade query error: {e}")
+
+        # 2. Look up shades in jobs for this Work Order
+        try:
+            cur.execute("""
+                SELECT DISTINCT shade_ref FROM jobs 
+                WHERE LOWER(TRIM(work_order_ref)) = LOWER(TRIM(?))
+            """, (wo_name,))
+            for r in cur.fetchall():
+                val = r['shade_ref'] if isinstance(r, dict) or hasattr(r, '__getitem__') else r[0]
+                add_shade(val)
+        except Exception as e:
+            print(f"[WARN] jobs shade query error: {e}")
+
+    # 3. If no shades linked yet, pull all existing shades across factory bags and jobs
+    if not shades:
+        try:
+            cur.execute("SELECT DISTINCT shade FROM bags WHERE shade IS NOT NULL AND shade != ''")
+            for r in cur.fetchall():
+                val = r['shade'] if isinstance(r, dict) or hasattr(r, '__getitem__') else r[0]
+                add_shade(val)
+        except Exception:
+            pass
+
+        try:
+            cur.execute("SELECT DISTINCT shade_ref FROM jobs WHERE shade_ref IS NOT NULL AND shade_ref != ''")
+            for r in cur.fetchall():
+                val = r['shade_ref'] if isinstance(r, dict) or hasattr(r, '__getitem__') else r[0]
+                add_shade(val)
+        except Exception:
+            pass
+
+    # 4. Standard industry baseline shades so user is never faced with an empty select
+    standard_shades = [
+        "Raw White", "Bleach White", "Jet Black", "Navy Blue", 
+        "Heather Grey", "Charcoal Melange", "Olive Green", 
+        "Royal Blue", "Maroon", "Red", "Beige", "Bottle Green"
+    ]
+    for s in standard_shades:
+        add_shade(s)
+
+    con.close()
+    return jsonify(shades)
+
+@app.route("/api/jobs-by-shade")
+@app.route("/api/jobs-by-shade/<path:subpath>")
+def jobs_by_shade(subpath=None):
+    wo_name = request.args.get("wo") or request.args.get("work_order")
+    shade_name = request.args.get("shade")
+    if subpath and not (wo_name and shade_name):
+        parts = subpath.split('/')
+        if len(parts) >= 2:
+            wo_name = "/".join(parts[:-1])
+            shade_name = parts[-1]
+        elif len(parts) == 1:
+            wo_name = parts[0]
+            shade_name = ""
+
+    wo_name = unquote(wo_name).strip() if wo_name else ""
+    shade_name = unquote(shade_name).strip() if shade_name else ""
+
+    con = db(); cur = con.cursor()
+    data = []
+
+    if wo_name and shade_name:
+        try:
+            cur.execute("""
+                SELECT job, needles_ref FROM jobs 
+                WHERE LOWER(TRIM(work_order_ref)) = LOWER(TRIM(?)) 
+                  AND LOWER(TRIM(shade_ref)) = LOWER(TRIM(?))
+                ORDER BY job ASC
+            """, (wo_name, shade_name))
+            rows = cur.fetchall()
+            for r in rows:
+                data.append(dict(r))
+        except Exception as e:
+            print(f"[WARN] jobs query error: {e}")
+
+    # Fallback to check lots if not yet in jobs
+    if not data and wo_name and shade_name:
+        try:
+            cur.execute("""
+                SELECT DISTINCT l.needles, l.job_id FROM lots l
+                JOIN bags b ON l.bag_id = b.id
+                JOIN plans p ON b.plan_id = p.id
+                JOIN work_orders wo ON p.work_order_id = wo.id
+                WHERE LOWER(TRIM(wo.work_order)) = LOWER(TRIM(?)) 
+                  AND LOWER(TRIM(b.shade)) = LOWER(TRIM(?))
+            """, (wo_name, shade_name))
+            rows = cur.fetchall()
+            for r in rows:
+                item = dict(r)
+                job_num = item.get('job_id') or 1
+                needles_val = item.get('needles') or '24N'
+                data.append({"job": job_num, "needles_ref": needles_val})
+        except Exception:
+            pass
+
+    # Ensure at least one viable job entry so user can sign in immediately
+    if not data:
+        data.append({"job": 1, "needles_ref": "24N"})
+
     con.close()
     return jsonify(data)
 
-@app.route("/api/jobs-by-shade/<wo_name>/<shade_name>")
-def jobs_by_shade(wo_name, shade_name):
+@app.route("/api/assignments-by-wo")
+@app.route("/api/assignments-by-wo/<path:wo_name>")
+def assignments_by_wo(wo_name=None):
+    if not wo_name:
+        wo_name = request.args.get("wo") or request.args.get("work_order") or ""
+    wo_name = unquote(wo_name).strip() if wo_name else ""
+
     con = db(); cur = con.cursor()
-    cur.execute("""
-        SELECT job, needles_ref FROM jobs 
-        WHERE work_order_ref = ? AND shade_ref = ?
-    """, (wo_name, shade_name))
-    data = [dict(r) for r in cur.fetchall()]
-    con.close()
-    return jsonify(data)
+    try:
+        if wo_name:
+            cur.execute("""
+                SELECT id, unique_code, machine_no, unit_no, job_full_text, needles, created_at
+                FROM machine_assignments
+                WHERE job_full_text LIKE ? OR job_full_text LIKE ?
+                ORDER BY id DESC
+            """, (f"%/{wo_name}", f"%{wo_name}%"))
+        else:
+            cur.execute("""
+                SELECT id, unique_code, machine_no, unit_no, job_full_text, needles, created_at
+                FROM machine_assignments
+                ORDER BY id DESC LIMIT 50
+            """)
+        rows = [dict(r) for r in cur.fetchall()]
+    except Exception as e:
+        print(f"[WARN] assignments query error: {e}")
+        rows = []
+    finally:
+        con.close()
+    return jsonify(rows)
 
 @app.route("/api/barcode-details/<barcode>")
 def api_barcode_details(barcode):

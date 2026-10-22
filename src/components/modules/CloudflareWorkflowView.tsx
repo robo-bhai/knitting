@@ -305,40 +305,40 @@ jobs:
             
             # 1. Continuous New Run Detector: Checks if a newer workflow run has been triggered
             NEW_RUN_SIGNAL=\$(python3 -c '
-import os, sys, json, urllib.request
+            import os, sys, json, urllib.request
 
-repo = os.environ.get("CUR_REPOSITORY") or os.environ.get("GITHUB_REPOSITORY", "")
-token = os.environ.get("GITHUB_TOKEN", "")
-cur_id = int(os.environ.get("CUR_RUN_ID") or os.environ.get("GITHUB_RUN_ID", "0"))
-cur_num = int(os.environ.get("CUR_RUN_NUMBER") or os.environ.get("GITHUB_RUN_NUMBER", "0"))
-active_statuses = ("queued", "in_progress", "waiting", "pending", "requested")
+            repo = os.environ.get("CUR_REPOSITORY") or os.environ.get("GITHUB_REPOSITORY", "")
+            token = os.environ.get("GITHUB_TOKEN", "")
+            cur_id = int(os.environ.get("CUR_RUN_ID") or os.environ.get("GITHUB_RUN_ID", "0"))
+            cur_num = int(os.environ.get("CUR_RUN_NUMBER") or os.environ.get("GITHUB_RUN_NUMBER", "0"))
+            active_statuses = ("queued", "in_progress", "waiting", "pending", "requested")
 
-if token and repo:
-    try:
-        req = urllib.request.Request(
-            f"https://api.github.com/repos/{repo}/actions/runs?per_page=30",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/vnd.github.v3+json",
-                "User-Agent": "GarmentFlow-Detector"
-            }
-        )
-        with urllib.request.urlopen(req, timeout=6) as r:
-            runs = json.loads(r.read().decode()).get("workflow_runs", [])
-            newer = [
-                x for x in runs
-                if x.get("status") in active_statuses
-                and x.get("id") != cur_id
-                and (x.get("id", 0) > cur_id or x.get("run_number", 0) > cur_num)
-            ]
-            if newer:
-                first = newer[0]
-                run_id = first.get("id", "")
-                st = first.get("status", "")
-                print(f"{run_id} ({st})")
-    except Exception:
-        pass
-' 2>/dev/null || echo "")
+            if token and repo:
+                try:
+                    req = urllib.request.Request(
+                        f"https://api.github.com/repos/{repo}/actions/runs?per_page=30",
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Accept": "application/vnd.github.v3+json",
+                            "User-Agent": "GarmentFlow-Detector"
+                        }
+                    )
+                    with urllib.request.urlopen(req, timeout=6) as r:
+                        runs = json.loads(r.read().decode()).get("workflow_runs", [])
+                        newer = [
+                            x for x in runs
+                            if x.get("status") in active_statuses
+                            and x.get("id") != cur_id
+                            and (x.get("id", 0) > cur_id or x.get("run_number", 0) > cur_num)
+                        ]
+                        if newer:
+                            first = newer[0]
+                            run_id = first.get("id", "")
+                            st = first.get("status", "")
+                            print(f"{run_id} ({st})")
+                except Exception:
+                    pass
+            ' 2>/dev/null || echo "")
 
             if [ -n "\$NEW_RUN_SIGNAL" ]; then
               echo "=========================================================="

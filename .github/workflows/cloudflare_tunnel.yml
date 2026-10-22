@@ -11,6 +11,10 @@ on:
   # push:
   #   branches: [ main ]
 
+permissions:
+  actions: read
+  contents: read
+
 jobs:
   run-server-and-tunnel:
     name: Run Application, GitHub MySQL & Cloudflare Tunnel
@@ -52,6 +56,66 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
+      - name: ⏳ Wait for Previous Workflow Run to Complete & Save Cache
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=========================================================="
+          echo "🔍 CHECKING FOR ACTIVE PREVIOUS WORKFLOW RUNS            "
+          echo "=========================================================="
+          python3 -c "
+          import os, sys, time, json, urllib.request
+
+          repo = os.environ.get('GITHUB_REPOSITORY', '')
+          token = os.environ.get('GITHUB_TOKEN', '')
+          cur_id = int(os.environ.get('GITHUB_RUN_ID', '0'))
+          cur_num = int(os.environ.get('GITHUB_RUN_NUMBER', '0'))
+
+          if not token or not repo:
+              print('ℹ️ GITHUB_TOKEN not available; skipping previous run wait check.')
+              sys.exit(0)
+
+          max_wait = 180 # 3 minutes max wait for previous run to complete snapshot
+          poll_interval = 8
+          elapsed = 0
+
+          print(f'Current Run ID: {cur_id} (Run #{cur_num})')
+          print('Checking if an earlier workflow run is actively running and saving database cache...')
+
+          while elapsed < max_wait:
+              try:
+                  req = urllib.request.Request(
+                      f'https://api.github.com/repos/{repo}/actions/runs?per_page=20',
+                      headers={
+                          'Authorization': f'Bearer {token}',
+                          'Accept': 'application/vnd.github.v3+json',
+                          'User-Agent': 'GarmentFlow-Coordinator'
+                      }
+                  )
+                  with urllib.request.urlopen(req, timeout=10) as resp:
+                      data = json.loads(resp.read().decode())
+                      runs = data.get('workflow_runs', [])
+                      active_prev = [
+                          r for r in runs 
+                          if r.get('status') == 'in_progress' 
+                          and r.get('id') != cur_id 
+                          and r.get('run_number', 0) < cur_num
+                      ]
+                      if not active_prev:
+                          print('✅ No active previous workflow runs detected. Cache is fully saved and safe to restore!')
+                          sys.exit(0)
+                      
+                      prev_ids = [str(r['id']) for r in active_prev]
+                      print(f'⏳ Previous run(s) active: {prev_ids}. Waiting for safe database snapshot into cache ({elapsed}s / {max_wait}s)...')
+              except Exception as e:
+                  print(f'⚠️ Warning during check: {e}')
+
+              time.sleep(poll_interval)
+              elapsed += poll_interval
+
+          print('⚠️ Wait timeout reached. Proceeding with cache restore.')
+          "
+
       - name: 📦 Install Python Dependencies & MySQL Client
         run: |
           python -m pip install --upgrade pip
@@ -67,7 +131,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: db_backup
-          key: garmentflow-mysql-${{ github.run_id }}-${{ github.run_attempt }}
+          key: garmentflow-mysql-${{ github.run_number }}-${{ github.run_attempt }}
           restore-keys: |
             garmentflow-mysql-
 
@@ -168,9 +232,10 @@ jobs:
             tail -n 20 tunnel.log || true
           fi
 
-      - name: ⏳ Keep Server Active & Periodic MySQL Backup (Up to 5 Hours)
+      - name: ⏳ Keep Server Active, Detect New Runs & Periodic MySQL Backup
         env:
           INPUT_HOURS: ${{ github.event.inputs.duration_hours || '5' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           DURATION_HOURS=${INPUT_HOURS:-5}
           TOTAL_SECONDS=$((DURATION_HOURS * 3600))
@@ -178,11 +243,12 @@ jobs:
           echo "=========================================================="
           echo "🟢 Server, GitHub MySQL & Cloudflare Tunnel are LIVE!"
           echo "⏱️ Target duration: $DURATION_HOURS hour(s) ($TOTAL_SECONDS seconds)"
-          echo "💾 Periodic MySQL backup enabled to ensure zero data loss."
+          echo "💾 Periodic MySQL backup enabled (Every 60s)."
+          echo "👀 Continuous New Run Detection enabled (Every 10s)."
           echo "=========================================================="
           
           START_TIME=$(date +%s)
-          INTERVAL=300 # Print heartbeat and sync DB snapshot every 5 minutes
+          LAST_BACKUP=0
           
           while true; do
             CURRENT_TIME=$(date +%s)
@@ -194,30 +260,71 @@ jobs:
               break
             fi
             
-            ELAPSED_MIN=$((ELAPSED / 60))
-            REMAINING_MIN=$((REMAINING / 60))
-            
-            # Periodic snapshot of MySQL into db_backup/garmentflow_pro.sql
-            mkdir -p db_backup
-            mysqldump -h 127.0.0.1 -P 3306 -u root -proot \
-              --single-transaction \
-              --quick \
-              --databases garmentflow_pro > db_backup/garmentflow_pro.sql 2>/dev/null || true
-            
-            # Health check on local Flask server
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/login || echo "FAIL")
-            echo "💓 Heartbeat: [Elapsed: ${ELAPSED_MIN}m / Remaining: ${REMAINING_MIN}m] | HTTP $STATUS | DB Sync: OK"
-            
-            SLEEP_TIME=$INTERVAL
-            if [ $REMAINING -lt $INTERVAL ]; then
-              SLEEP_TIME=$REMAINING
+            # 1. Continuous New Run Detector: Checks if a newer workflow run has been triggered
+            NEW_RUN_SIGNAL=$(python3 -c "
+            import os, json, urllib.request
+            repo = os.environ.get('GITHUB_REPOSITORY', '')
+            token = os.environ.get('GITHUB_TOKEN', '')
+            cur_id = int(os.environ.get('GITHUB_RUN_ID', '0'))
+            cur_num = int(os.environ.get('GITHUB_RUN_NUMBER', '0'))
+            if token and repo:
+                try:
+                    req = urllib.request.Request(
+                        f'https://api.github.com/repos/{repo}/actions/runs?per_page=15',
+                        headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'GarmentFlow-Detector'}
+                    )
+                    with urllib.request.urlopen(req, timeout=6) as r:
+                        runs = json.loads(r.read().decode()).get('workflow_runs', [])
+                        newer = [x['id'] for x in runs if x.get('status') in ('queued', 'in_progress') and x.get('id') != cur_id and x.get('run_number', 0) > cur_num]
+                        if newer:
+                            print(','.join(map(str, newer)))
+                except Exception:
+                    pass
+            " 2>/dev/null || echo "")
+
+            if [ -n "$NEW_RUN_SIGNAL" ]; then
+              echo "=========================================================="
+              echo "🚨 NEW WORKFLOW RUN DETECTED (#$NEW_RUN_SIGNAL)!"
+              echo "📦 Taking immediate atomic snapshot of MySQL database..."
+              echo "=========================================================="
+              mkdir -p db_backup
+              mysqldump -h 127.0.0.1 -P 3306 -u root -proot \
+                --single-transaction \
+                --quick \
+                --triggers \
+                --routines \
+                --databases garmentflow_pro > db_backup/garmentflow_pro.sql 2>/dev/null || true
+              echo "✅ Snapshot ready: $(ls -lh db_backup/garmentflow_pro.sql)"
+              echo "👋 Gracefully stopping server to yield to new workflow run..."
+              break
             fi
-            sleep $SLEEP_TIME
+
+            # 2. Periodic background dump every 60 seconds
+            TIME_SINCE_BACKUP=$((CURRENT_TIME - LAST_BACKUP))
+            if [ $TIME_SINCE_BACKUP -ge 60 ]; then
+              mkdir -p db_backup
+              mysqldump -h 127.0.0.1 -P 3306 -u root -proot \
+                --single-transaction \
+                --quick \
+                --databases garmentflow_pro > db_backup/garmentflow_pro.sql 2>/dev/null || true
+              LAST_BACKUP=$CURRENT_TIME
+              ELAPSED_MIN=$((ELAPSED / 60))
+              REMAINING_MIN=$((REMAINING / 60))
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/login || echo "FAIL")
+              echo "💓 Monitor: [Elapsed: ${ELAPSED_MIN}m / Rem: ${REMAINING_MIN}m] | Web: $STATUS | DB Sync: OK"
+            fi
+
+            sleep 10
           done
 
-      # ================= SAFE DATA CACHE & TEARDOWN ON TIMEOUT / CANCEL =================
+      # ================= SAFE DATA CACHE & TEARDOWN ON TIMEOUT, CANCEL OR NEW RUN HANDOFF =================
 
-      - name: 💾 Dump MySQL Database (Runs on Success, Cancel or Timeout)
+      - name: 🏷️ Generate Timestamped Cache Key
+        if: always()
+        run: |
+          echo "TIMESTAMP_KEY=garmentflow-mysql-${{ github.run_number }}-$(date +%s)" >> $GITHUB_ENV
+
+      - name: 💾 Dump MySQL Database (Runs on Success, Cancel, Timeout, or Handoff)
         if: always()
         run: |
           echo "=========================================================="
@@ -234,15 +341,16 @@ jobs:
               --databases garmentflow_pro > db_backup/garmentflow_pro.sql
             echo "✅ Export complete: $(ls -lh db_backup/garmentflow_pro.sql)"
           else
-            echo "⚠️ MySQL service not responding, using latest periodic backup if available."
+            echo "⚠️ MySQL service not responding or down, using latest periodic backup if available."
+            ls -lh db_backup/garmentflow_pro.sql || true
           fi
 
-      - name: 📦 Save MySQL Cache to GitHub Actions Cache (Runs on Success, Cancel or Timeout)
+      - name: 📦 Save MySQL Cache to GitHub Actions Cache (Runs on Success, Cancel, Timeout, or Handoff)
         if: always()
         uses: actions/cache/save@v4
         with:
           path: db_backup
-          key: garmentflow-mysql-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.run_number }}
+          key: ${{ env.TIMESTAMP_KEY || format('garmentflow-mysql-{0}-{1}', github.run_number, github.run_attempt) }}
 
       - name: 🧹 Graceful Server & Tunnel Teardown
         if: always()

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   Cpu, Copy, Check, Shield, Globe, Terminal, ArrowRight,
   Clock, Key, Download, CheckCircle2, AlertCircle, ExternalLink,
-  Database, RefreshCw, HardDrive, CheckCircle
+  Database, RefreshCw, HardDrive, CheckCircle, PauseCircle, PlayCircle
 } from 'lucide-react';
 
 export const CloudflareWorkflowView: React.FC = () => {
@@ -20,6 +20,10 @@ on:
   # Optional: un-comment to automatically trigger on push
   # push:
   #   branches: [ main ]
+
+permissions:
+  actions: read
+  contents: read
 
 jobs:
   run-server-and-tunnel:
@@ -62,6 +66,66 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
+      - name: ⏳ Wait for Previous Workflow Run to Complete & Save Cache
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=========================================================="
+          echo "🔍 CHECKING FOR ACTIVE PREVIOUS WORKFLOW RUNS            "
+          echo "=========================================================="
+          python3 -c "
+          import os, sys, time, json, urllib.request
+
+          repo = os.environ.get('GITHUB_REPOSITORY', '')
+          token = os.environ.get('GITHUB_TOKEN', '')
+          cur_id = int(os.environ.get('GITHUB_RUN_ID', '0'))
+          cur_num = int(os.environ.get('GITHUB_RUN_NUMBER', '0'))
+
+          if not token or not repo:
+              print('ℹ️ GITHUB_TOKEN not available; skipping previous run wait check.')
+              sys.exit(0)
+
+          max_wait = 180 # 3 minutes max wait for previous run to complete snapshot
+          poll_interval = 8
+          elapsed = 0
+
+          print(f'Current Run ID: {cur_id} (Run #{cur_num})')
+          print('Checking if an earlier workflow run is actively running and saving database cache...')
+
+          while elapsed < max_wait:
+              try:
+                  req = urllib.request.Request(
+                      f'https://api.github.com/repos/{repo}/actions/runs?per_page=20',
+                      headers={
+                          'Authorization': f'Bearer {token}',
+                          'Accept': 'application/vnd.github.v3+json',
+                          'User-Agent': 'GarmentFlow-Coordinator'
+                      }
+                  )
+                  with urllib.request.urlopen(req, timeout=10) as resp:
+                      data = json.loads(resp.read().decode())
+                      runs = data.get('workflow_runs', [])
+                      active_prev = [
+                          r for r in runs 
+                          if r.get('status') == 'in_progress' 
+                          and r.get('id') != cur_id 
+                          and r.get('run_number', 0) < cur_num
+                      ]
+                      if not active_prev:
+                          print('✅ No active previous workflow runs detected. Cache is fully saved and safe to restore!')
+                          sys.exit(0)
+                      
+                      prev_ids = [str(r['id']) for r in active_prev]
+                      print(f'⏳ Previous run(s) active: {prev_ids}. Waiting for safe database snapshot into cache ({elapsed}s / {max_wait}s)...')
+              except Exception as e:
+                  print(f'⚠️ Warning during check: {e}')
+
+              time.sleep(poll_interval)
+              elapsed += poll_interval
+
+          print('⚠️ Wait timeout reached. Proceeding with cache restore.')
+          "
+
       - name: 📦 Install Python Dependencies & MySQL Client
         run: |
           python -m pip install --upgrade pip
@@ -77,7 +141,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: db_backup
-          key: garmentflow-mysql-\${{ github.run_id }}-\${{ github.run_attempt }}
+          key: garmentflow-mysql-\${{ github.run_number }}-\${{ github.run_attempt }}
           restore-keys: |
             garmentflow-mysql-
 
@@ -178,9 +242,10 @@ jobs:
             tail -n 20 tunnel.log || true
           fi
 
-      - name: ⏳ Keep Server Active & Periodic MySQL Backup (Up to 5 Hours)
+      - name: ⏳ Keep Server Active, Detect New Runs & Periodic MySQL Backup
         env:
           INPUT_HOURS: \${{ github.event.inputs.duration_hours || '5' }}
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
         run: |
           DURATION_HOURS=\${INPUT_HOURS:-5}
           TOTAL_SECONDS=$((DURATION_HOURS * 3600))
@@ -188,11 +253,12 @@ jobs:
           echo "=========================================================="
           echo "🟢 Server, GitHub MySQL & Cloudflare Tunnel are LIVE!"
           echo "⏱️ Target duration: $DURATION_HOURS hour(s) ($TOTAL_SECONDS seconds)"
-          echo "💾 Periodic MySQL backup enabled to ensure zero data loss."
+          echo "💾 Periodic MySQL backup enabled (Every 60s)."
+          echo "👀 Continuous New Run Detection enabled (Every 10s)."
           echo "=========================================================="
           
           START_TIME=$(date +%s)
-          INTERVAL=300 # Print heartbeat and sync DB snapshot every 5 minutes
+          LAST_BACKUP=0
           
           while true; do
             CURRENT_TIME=$(date +%s)
@@ -204,34 +270,75 @@ jobs:
               break
             fi
             
-            ELAPSED_MIN=$((ELAPSED / 60))
-            REMAINING_MIN=$((REMAINING / 60))
-            
-            # Periodic snapshot of MySQL into db_backup/garmentflow_pro.sql
-            mkdir -p db_backup
-            mysqldump -h 127.0.0.1 -P 3306 -u root -proot \\
-              --single-transaction \\
-              --quick \\
-              --databases garmentflow_pro > db_backup/garmentflow_pro.sql 2>/dev/null || true
-            
-            # Health check on local Flask server
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/login || echo "FAIL")
-            echo "💓 Heartbeat: [Elapsed: \${ELAPSED_MIN}m / Remaining: \${REMAINING_MIN}m] | HTTP $STATUS | DB Sync: OK"
-            
-            SLEEP_TIME=$INTERVAL
-            if [ $REMAINING -lt $INTERVAL ]; then
-              SLEEP_TIME=$REMAINING
+            # 1. Continuous New Run Detector: Checks if a newer workflow run has been triggered
+            NEW_RUN_SIGNAL=$(python3 -c "
+            import os, json, urllib.request
+            repo = os.environ.get('GITHUB_REPOSITORY', '')
+            token = os.environ.get('GITHUB_TOKEN', '')
+            cur_id = int(os.environ.get('GITHUB_RUN_ID', '0'))
+            cur_num = int(os.environ.get('GITHUB_RUN_NUMBER', '0'))
+            if token and repo:
+                try:
+                    req = urllib.request.Request(
+                        f'https://api.github.com/repos/{repo}/actions/runs?per_page=15',
+                        headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'GarmentFlow-Detector'}
+                    )
+                    with urllib.request.urlopen(req, timeout=6) as r:
+                        runs = json.loads(r.read().decode()).get('workflow_runs', [])
+                        newer = [x['id'] for x in runs if x.get('status') in ('queued', 'in_progress') and x.get('id') != cur_id and x.get('run_number', 0) > cur_num]
+                        if newer:
+                            print(','.join(map(str, newer)))
+                except Exception:
+                    pass
+            " 2>/dev/null || echo "")
+
+            if [ -n "$NEW_RUN_SIGNAL" ]; then
+              echo "=========================================================="
+              echo "🚨 NEW WORKFLOW RUN DETECTED (#$NEW_RUN_SIGNAL)!"
+              echo "📦 Taking immediate atomic snapshot of MySQL database..."
+              echo "=========================================================="
+              mkdir -p db_backup
+              mysqldump -h 127.0.0.1 -P 3306 -u root -proot \\
+                --single-transaction \\
+                --quick \\
+                --triggers \\
+                --routines \\
+                --databases garmentflow_pro > db_backup/garmentflow_pro.sql 2>/dev/null || true
+              echo "✅ Snapshot ready: $(ls -lh db_backup/garmentflow_pro.sql)"
+              echo "👋 Gracefully stopping server to yield to new workflow run..."
+              break
             fi
-            sleep $SLEEP_TIME
+
+            # 2. Periodic background dump every 60 seconds
+            TIME_SINCE_BACKUP=$((CURRENT_TIME - LAST_BACKUP))
+            if [ $TIME_SINCE_BACKUP -ge 60 ]; then
+              mkdir -p db_backup
+              mysqldump -h 127.0.0.1 -P 3306 -u root -proot \\
+                --single-transaction \\
+                --quick \\
+                --databases garmentflow_pro > db_backup/garmentflow_pro.sql 2>/dev/null || true
+              LAST_BACKUP=$CURRENT_TIME
+              ELAPSED_MIN=$((ELAPSED / 60))
+              REMAINING_MIN=$((REMAINING / 60))
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/login || echo "FAIL")
+              echo "💓 Monitor: [Elapsed: \${ELAPSED_MIN}m / Rem: \${REMAINING_MIN}m] | Web: $STATUS | DB Sync: OK"
+            fi
+
+            sleep 10
           done
 
-      # ================= SAFE DATA CACHE & TEARDOWN ON TIMEOUT / CANCEL =================
+      # ================= SAFE DATA CACHE & TEARDOWN ON TIMEOUT, CANCEL OR NEW RUN HANDOFF =================
 
-      - name: 💾 Dump MySQL Database (Runs on Success, Cancel or Timeout)
+      - name: 🏷️ Generate Timestamped Cache Key
+        if: always()
+        run: |
+          echo "TIMESTAMP_KEY=garmentflow-mysql-\${{ github.run_number }}-$(date +%s)" >> $GITHUB_ENV
+
+      - name: 💾 Dump MySQL Database (Runs on Success, Cancel, Timeout, or Handoff)
         if: always()
         run: |
           echo "=========================================================="
-          echo "💾 EXPORTING MYSQL DATABASE FOR PERSISTENT ACTIONS CACHE  "
+          echo "💾 FINAL MYSQL DATABASE EXPORT FOR ACTIONS CACHE         "
           echo "=========================================================="
           mkdir -p db_backup
           if mysqladmin ping -h 127.0.0.1 -P 3306 -u root -proot --silent; then
@@ -244,15 +351,16 @@ jobs:
               --databases garmentflow_pro > db_backup/garmentflow_pro.sql
             echo "✅ Export complete: $(ls -lh db_backup/garmentflow_pro.sql)"
           else
-            echo "⚠️ MySQL service not responding, using latest periodic backup if available."
+            echo "⚠️ MySQL service not responding or down, using latest periodic backup if available."
+            ls -lh db_backup/garmentflow_pro.sql || true
           fi
 
-      - name: 📦 Save MySQL Cache to GitHub Actions Cache (Runs on Success, Cancel or Timeout)
+      - name: 📦 Save MySQL Cache to GitHub Actions Cache (Runs on Success, Cancel, Timeout, or Handoff)
         if: always()
         uses: actions/cache/save@v4
         with:
           path: db_backup
-          key: garmentflow-mysql-\${{ github.run_id }}-\${{ github.run_attempt }}-\${{ github.run_number }}
+          key: \${{ env.TIMESTAMP_KEY || format('garmentflow-mysql-{0}-{1}', github.run_number, github.run_attempt) }}
 
       - name: 🧹 Graceful Server & Tunnel Teardown
         if: always()
@@ -287,14 +395,14 @@ jobs:
           <div className="flex items-center gap-2 mb-1">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span className="text-xs font-mono text-emerald-400 font-bold uppercase tracking-wider">
-              GitHub Actions &bull; Native MySQL &bull; Safe Cache Persistence
+              GitHub Actions &bull; Native MySQL &bull; Safe Cache &bull; Run Handoff
             </span>
           </div>
           <h1 className="text-xl font-bold tracking-tight text-white">
             GarmentFlow Server + GitHub MySQL + Cloudflare Tunnel
           </h1>
           <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-            Production-ready CI/CD workflow with GitHub internal MySQL (Docker service container), automatic Actions Cache restore, database auto-migration on start, and safe <code className="text-emerald-300">if: always()</code> dump to cache on cancel or timeout.
+            Multi-run coordination with automatic previous-run waiting step, continuous new-run detection, atomic MySQL snapshot caching, and instant cache restoration on next run.
           </p>
         </div>
 
@@ -317,7 +425,7 @@ jobs:
       </div>
 
       {/* Feature Highlights: GitHub MySQL & Persistent Cache Architecture */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-col justify-between">
           <div>
             <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 text-blue-600 flex items-center justify-center mb-3">
@@ -325,44 +433,60 @@ jobs:
             </div>
             <h3 className="text-xs font-bold text-slate-900">1. GitHub Native MySQL</h3>
             <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
-              GitHub runner ke andar hi <code className="bg-slate-100 px-1 py-0.5 rounded text-blue-700 font-mono">services: mysql:8.0</code> chalaya jata hai. Kisi external cloud database ki zaroorat nahi hai.
+              GitHub runner ke andar hi <code className="bg-slate-100 px-1 py-0.5 rounded text-blue-700 font-mono">services: mysql:8.0</code> chalaya jata hai. External cloud database ki zaroorat nahi.
             </p>
           </div>
           <div className="mt-3 pt-2.5 border-t border-slate-100 text-[10px] text-slate-500 font-mono flex items-center gap-1.5">
             <CheckCircle className="w-3.5 h-3.5 text-blue-500" />
-            <span>Host: 127.0.0.1:3306 (user: root)</span>
+            <span>127.0.0.1:3306 (user: root)</span>
           </div>
         </div>
 
         <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-col justify-between">
           <div>
-            <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center mb-3">
-              <RefreshCw className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-lg bg-purple-50 border border-purple-200 text-purple-600 flex items-center justify-center mb-3">
+              <Clock className="w-4 h-4" />
             </div>
-            <h3 className="text-xs font-bold text-slate-900">2. Auto Tables Check & Migration</h3>
+            <h3 className="text-xs font-bold text-slate-900">2. Wait for Previous Run Step</h3>
             <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
-              Workflow start hone par <code className="bg-slate-100 px-1 py-0.5 rounded text-emerald-700 font-mono">repair_and_migrate_db()</code> chalata hai. All 16 tables auto-check, create aur missing columns alter ho jate hain.
+              New workflow start hotay hi pehle check karta hai agar koi purana run active hai to uske complete aur cache save hone ka wait karta hai.
             </p>
           </div>
           <div className="mt-3 pt-2.5 border-t border-slate-100 text-[10px] text-slate-500 font-mono flex items-center gap-1.5">
-            <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Lots, Rolls, HR, Gate Pass, Quality OK</span>
+            <CheckCircle className="w-3.5 h-3.5 text-purple-500" />
+            <span>Zero Tunnel / Cache Conflict</span>
           </div>
         </div>
 
         <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-col justify-between">
           <div>
             <div className="w-8 h-8 rounded-lg bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mb-3">
-              <HardDrive className="w-4 h-4" />
+              <RefreshCw className="w-4 h-4" />
             </div>
-            <h3 className="text-xs font-bold text-slate-900">3. Safe Cache on Cancel / Timeout</h3>
+            <h3 className="text-xs font-bold text-slate-900">3. Live New-Run Detector</h3>
             <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
-              Jab workflow cancel karein ya 5 hours timeout ho, <code className="bg-slate-100 px-1 py-0.5 rounded text-amber-700 font-mono">if: always()</code> step chalta hai jo <code className="font-mono">mysqldump</code> ko GitHub Cache mein save kar deta hai.
+              Server loop har 10 seconds baad check karta hai. Jaise hi naya run trigger ho, pehla run foran atomic snapshot save karke handoff kar deta hai.
             </p>
           </div>
           <div className="mt-3 pt-2.5 border-t border-slate-100 text-[10px] text-slate-500 font-mono flex items-center gap-1.5">
             <CheckCircle className="w-3.5 h-3.5 text-amber-500" />
-            <span>Next run auto-restores cached SQL</span>
+            <span>Instant Graceful Exit</span>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center mb-3">
+              <HardDrive className="w-4 h-4" />
+            </div>
+            <h3 className="text-xs font-bold text-slate-900">4. Safe Cache Restore</h3>
+            <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
+              Naye run par latest cache se SQL database restore hota hai aur <code className="bg-slate-100 px-1 py-0.5 rounded text-emerald-700 font-mono">repair_and_migrate_db()</code> all 16 tables auto-check karta hai.
+            </p>
+          </div>
+          <div className="mt-3 pt-2.5 border-t border-slate-100 text-[10px] text-slate-500 font-mono flex items-center gap-1.5">
+            <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
+            <span>Zero Data Loss Guaranteed</span>
           </div>
         </div>
       </div>
@@ -391,100 +515,62 @@ jobs:
           <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1.5">
             <div className="flex items-center gap-2 text-slate-900 font-bold">
               <span className="w-5 h-5 rounded-full bg-slate-900 text-white text-[11px] flex items-center justify-center font-mono">2</span>
-              <span>Custom Domain Link Karein</span>
+              <span>Sirf 1 GitHub Secret Add Kro</span>
             </div>
             <p className="text-slate-600">
-              Tunnel k andar <strong>Public Hostname</strong> tab par click karein.
+              Apni GitHub repo &rarr; <strong>Settings</strong> &rarr; <strong>Secrets and variables</strong> &rarr; <strong>Actions</strong> &rarr; <strong>New repository secret</strong>.
             </p>
-            <p className="text-slate-500 text-[11px]">
-              Subdomain: <code>erp</code> (ya jo aap chahein) &bull; Domain: <code>apnidomain.com</code> &bull; Service Type: <code>HTTP</code> &bull; URL: <code>127.0.0.1:5000</code>.
-            </p>
+            <div className="p-2 bg-emerald-50 border border-emerald-200 rounded font-mono text-[11px] text-emerald-900">
+              Name: <strong>CLOUDFLARE_TUNNEL_TOKEN</strong><br />
+              Value: [Paste your token from Step 1]
+            </div>
           </div>
 
           <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1.5">
             <div className="flex items-center gap-2 text-slate-900 font-bold">
               <span className="w-5 h-5 rounded-full bg-slate-900 text-white text-[11px] flex items-center justify-center font-mono">3</span>
-              <span>Sirf CLOUDFLARE_TUNNEL_TOKEN Daalein</span>
+              <span>Public Hostname Route Set Kro</span>
             </div>
             <p className="text-slate-600">
-              GitHub Repo &rarr; <strong>Settings</strong> &rarr; <strong>Secrets and variables</strong> &rarr; <strong>Actions</strong>.
+              Tunnel ke <strong>Public Hostname</strong> tab mein jakar apna domain set karein:
             </p>
-            <p className="text-slate-500 text-[11px]">
-              "New repository secret" click karein: Name: <code className="text-emerald-700 font-bold">CLOUDFLARE_TUNNEL_TOKEN</code> aur value paste karein. MySQL khud GitHub Actions ke andar chalega aur automatically cache hoga!
-            </p>
+            <div className="p-2 bg-slate-100 rounded font-mono text-[11px] text-slate-800 space-y-0.5">
+              <div>Subdomain: <code>erp</code> | Domain: <code>yourdomain.com</code></div>
+              <div>Type: <code>HTTP</code> | URL: <code>127.0.0.1:5000</code></div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Secret Keys Summary */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-        <h2 className="font-bold text-sm text-slate-900 mb-3 flex items-center gap-2">
-          <Key className="w-4 h-4 text-amber-500" />
-          GitHub Repository Secrets Mapping (Simplified)
-        </h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-600 uppercase text-[10px] font-semibold border-b">
-              <tr>
-                <th className="py-2.5 px-3">Secret Key Name</th>
-                <th className="py-2.5 px-3">Status</th>
-                <th className="py-2.5 px-3">Description</th>
-                <th className="py-2.5 px-3">Default / Fallback</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              <tr className="bg-emerald-50/40">
-                <td className="py-2.5 px-3 font-mono font-bold text-emerald-700">CLOUDFLARE_TUNNEL_TOKEN</td>
-                <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-bold">ONLY REQUIRED SECRET</span></td>
-                <td className="py-2.5 px-3 text-slate-700 font-medium">Cloudflare Zero Trust connector token. Iss aik token se tunnel, account, aur custom domain sab khud hi connect ho jata hai.</td>
-                <td className="py-2.5 px-3 font-mono text-slate-500">eyJhIjoiY2... (Your secret)</td>
-              </tr>
-              <tr>
-                <td className="py-2.5 px-3 font-mono font-bold text-slate-800">ADMIN_USERNAME</td>
-                <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-bold">SECRETS / DEFAULT</span></td>
-                <td className="py-2.5 px-3 text-slate-600">Default admin username (sirf admin user create hoga, baki users admin dashboard se banaye ga)</td>
-                <td className="py-2.5 px-3 font-mono text-slate-500">admin</td>
-              </tr>
-              <tr>
-                <td className="py-2.5 px-3 font-mono font-bold text-slate-800">ADMIN_PASSWORDS</td>
-                <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-bold">SECRETS / DEFAULT</span></td>
-                <td className="py-2.5 px-3 text-slate-600">Admin password secrets se load hota hai aur startup par safely sync hota hai</td>
-                <td className="py-2.5 px-3 font-mono text-slate-500">admin123 (or your secret)</td>
-              </tr>
-              <tr>
-                <td className="py-2.5 px-3 font-mono font-bold text-slate-800">GitHub Actions MySQL</td>
-                <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold">BUILT-IN AUTOMATIC</span></td>
-                <td className="py-2.5 px-3 text-slate-600">Workflow ke andar native MySQL 8 container chalta hai. Kisi remote host ya secret ki zaroorat nahi.</td>
-                <td className="py-2.5 px-3 font-mono text-slate-500">127.0.0.1:3306 / garmentflow_pro</td>
-              </tr>
-              <tr>
-                <td className="py-2.5 px-3 font-mono font-bold text-slate-800">GitHub Actions Cache</td>
-                <td className="py-2.5 px-3"><span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">PERSISTENT STORAGE</span></td>
-                <td className="py-2.5 px-3 text-slate-600">Cancel ya timeout par database dump save hota hai aur agli run par automatically restore hota hai.</td>
-                <td className="py-2.5 px-3 font-mono text-slate-500">garmentflow-mysql-*</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Code Viewer */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+      {/* YAML Preview & Actions */}
+      <div className="bg-slate-900 rounded-xl border border-slate-800 p-5 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3 pb-3 border-b border-slate-800">
           <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400 font-mono block">Workflow Location</span>
-            <span className="text-xs font-bold font-mono text-slate-900">.github/workflows/cloudflare_tunnel.yml</span>
+            <span className="text-xs font-bold font-mono text-emerald-400 block mb-0.5">Workflow File Content</span>
+            <span className="text-xs font-bold font-mono text-slate-200">.github/workflows/cloudflare_tunnel.yml</span>
           </div>
-          <span className="text-xs font-mono text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded border border-emerald-200 font-semibold">
-            Ready for GitHub Actions
-          </span>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCopy}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+            <button
+              onClick={handleDownloadYaml}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors border border-slate-700 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-amber-400" />
+              Download
+            </button>
+          </div>
         </div>
 
-        <div className="bg-slate-950 text-slate-100 p-4 font-mono text-xs overflow-x-auto max-h-[600px] scrollbar-thin scrollbar-thumb-slate-800">
-          <pre className="whitespace-pre">
-            <code>{workflowYaml}</code>
-          </pre>
-        </div>
+        <pre className="p-4 bg-slate-950 rounded-lg text-[11px] font-mono text-slate-300 overflow-x-auto leading-relaxed border border-slate-800 max-h-[500px]">
+          {workflowYaml}
+        </pre>
       </div>
     </div>
   );

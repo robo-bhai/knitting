@@ -66,16 +66,16 @@ jobs:
           echo "=========================================================="
           echo "🔍 CHECKING FOR ACTIVE PREVIOUS WORKFLOW RUNS            "
           echo "=========================================================="
-          python3 -c "
+          python3 -c '
           import os, sys, time, json, urllib.request
 
-          repo = os.environ.get('CUR_REPOSITORY') or os.environ.get('GITHUB_REPOSITORY', '')
-          token = os.environ.get('GITHUB_TOKEN', '')
-          cur_id = int(os.environ.get('CUR_RUN_ID') or os.environ.get('GITHUB_RUN_ID', '0'))
-          cur_num = int(os.environ.get('CUR_RUN_NUMBER') or os.environ.get('GITHUB_RUN_NUMBER', '0'))
+          repo = os.environ.get("CUR_REPOSITORY") or os.environ.get("GITHUB_REPOSITORY", "")
+          token = os.environ.get("GITHUB_TOKEN", "")
+          cur_id = int(os.environ.get("CUR_RUN_ID") or os.environ.get("GITHUB_RUN_ID", "0"))
+          cur_num = int(os.environ.get("CUR_RUN_NUMBER") or os.environ.get("GITHUB_RUN_NUMBER", "0"))
 
           if not token or not repo:
-              print('ℹ️ GITHUB_TOKEN not available; skipping previous run wait check.')
+              print("ℹ️ GITHUB_TOKEN not available; skipping previous run wait check.")
               sys.exit(0)
 
           max_wait = 180 # Up to 3 minutes
@@ -83,67 +83,68 @@ jobs:
           elapsed = 0
           signaled_runs = set()
 
-          print(f'Current Run ID: {cur_id} (Run #{cur_num})')
-          print('Checking if an earlier workflow run is actively running and saving database cache...')
+          print(f"Current Run ID: {cur_id} (Run #{cur_num})")
+          print("Checking if an earlier workflow run is actively running and saving database cache...")
 
           while elapsed < max_wait:
               try:
                   req = urllib.request.Request(
-                      f'https://api.github.com/repos/{repo}/actions/runs?per_page=30',
+                      f"https://api.github.com/repos/{repo}/actions/runs?per_page=30",
                       headers={
-                          'Authorization': f'Bearer {token}',
-                          'Accept': 'application/vnd.github.v3+json',
-                          'User-Agent': 'GarmentFlow-Coordinator'
+                          "Authorization": f"Bearer {token}",
+                          "Accept": "application/vnd.github.v3+json",
+                          "User-Agent": "GarmentFlow-Coordinator"
                       }
                   )
                   with urllib.request.urlopen(req, timeout=10) as resp:
                       data = json.loads(resp.read().decode())
-                      runs = data.get('workflow_runs', [])
-                      active_statuses = ('in_progress', 'queued', 'waiting', 'pending', 'requested')
+                      runs = data.get("workflow_runs", [])
+                      active_statuses = ("in_progress", "queued", "waiting", "pending", "requested")
                       
                       # Active older runs
                       active_prev = [
                           r for r in runs 
-                          if r.get('status') in active_statuses
-                          and r.get('id') != cur_id 
-                          and (r.get('id', 0) < cur_id or r.get('run_number', 0) < cur_num)
+                          if r.get("status") in active_statuses
+                          and r.get("id") != cur_id 
+                          and (r.get("id", 0) < cur_id or r.get("run_number", 0) < cur_num)
                       ]
 
                       if not active_prev:
-                          print('✅ No active previous workflow runs detected. Cache is fully saved and safe to restore!')
+                          print("✅ No active previous workflow runs detected. Cache is fully saved and safe to restore!")
                           sys.exit(0)
 
                       # Signal previous runs to trigger their safe snapshot & exit
                       for r in active_prev:
-                          pid = r['id']
-                          if pid not in signaled_runs:
-                              print(f'📢 Sending graceful handoff signal to previous active run #{pid} (status: {r.get(\"status\")})...')
+                          pid = r.get("id")
+                          st = r.get("status", "")
+                          if pid and pid not in signaled_runs:
+                              print(f"📢 Sending graceful handoff signal to previous active run #{pid} (status: {st})...")
                               try:
                                   cancel_req = urllib.request.Request(
-                                      f'https://api.github.com/repos/{repo}/actions/runs/{pid}/cancel',
-                                      method='POST',
+                                      f"https://api.github.com/repos/{repo}/actions/runs/{pid}/cancel",
+                                      method="POST",
                                       headers={
-                                          'Authorization': f'Bearer {token}',
-                                          'Accept': 'application/vnd.github.v3+json',
-                                          'User-Agent': 'GarmentFlow-Coordinator'
+                                          "Authorization": f"Bearer {token}",
+                                          "Accept": "application/vnd.github.v3+json",
+                                          "User-Agent": "GarmentFlow-Coordinator"
                                       }
                                   )
                                   with urllib.request.urlopen(cancel_req, timeout=10) as c_resp:
-                                      print(f'✅ Signal delivered to run #{pid} (HTTP {c_resp.status}). It will now snapshot MySQL into cache.')
+                                      print(f"✅ Signal delivered to run #{pid} (HTTP {c_resp.status}). It will now snapshot MySQL into cache.")
                               except Exception as ce:
-                                  print(f'ℹ️ Note on signal for run #{pid}: {ce}')
+                                  print(f"ℹ️ Note on signal for run #{pid}: {ce}")
                               signaled_runs.add(pid)
 
-                      prev_ids = [str(r['id']) for r in active_prev]
-                      print(f'⏳ Previous run(s) active: {prev_ids}. Waiting for safe database snapshot into cache ({elapsed}s / {max_wait}s)...')
+                      prev_ids = [str(r["id"]) for r in active_prev]
+                      print(f"⏳ Previous run(s) active: {prev_ids}. Waiting for safe database snapshot into cache ({elapsed}s / {max_wait}s)...")
               except Exception as e:
-                  print(f'⚠️ Warning during check: {e}')
+                  print(f"⚠️ Warning during check: {e}")
 
               time.sleep(poll_interval)
               elapsed += poll_interval
 
-          print('⚠️ Wait timeout reached. Proceeding with cache restore.')
-          "
+          print("⚠️ Wait timeout reached. Proceeding with cache restore.")
+          '
 
       - name: 📦 Install Python Dependencies & MySQL Client
         run: |
@@ -280,7 +281,7 @@ jobs:
           echo "=========================================================="
           
           START_TIME=$(date +%s)
-          LAST_BACKUP=0
+          LAST_BACKUP=$(date +%s)
           
           while true; do
             CURRENT_TIME=$(date +%s)
@@ -293,39 +294,43 @@ jobs:
             fi
             
             # 1. Continuous New Run Detector: Checks if a newer workflow run has been triggered
-            NEW_RUN_SIGNAL=$(python3 -c "
-            import os, sys, json, urllib.request
-            repo = os.environ.get('CUR_REPOSITORY') or os.environ.get('GITHUB_REPOSITORY', '')
-            token = os.environ.get('GITHUB_TOKEN', '')
-            cur_id = int(os.environ.get('CUR_RUN_ID') or os.environ.get('GITHUB_RUN_ID', '0'))
-            cur_num = int(os.environ.get('CUR_RUN_NUMBER') or os.environ.get('GITHUB_RUN_NUMBER', '0'))
-            active_statuses = ('queued', 'in_progress', 'waiting', 'pending', 'requested')
-            if token and repo:
-                try:
-                    req = urllib.request.Request(
-                        f'https://api.github.com/repos/{repo}/actions/runs?per_page=30',
-                        headers={
-                            'Authorization': f'Bearer {token}',
-                            'Accept': 'application/vnd.github.v3+json',
-                            'User-Agent': 'GarmentFlow-Detector'
-                        }
-                    )
-                    with urllib.request.urlopen(req, timeout=6) as r:
-                        runs = json.loads(r.read().decode()).get('workflow_runs', [])
-                        newer = [
-                            x for x in runs
-                            if x.get('status') in active_statuses
-                            and x.get('id') != cur_id
-                            and (x.get('id', 0) > cur_id or x.get('run_number', 0) > cur_num)
-                        ]
-                        if newer:
-                            first = newer[0]
-                            print(f\"{first['id']} ({first.get('status')})\")
-                except Exception as e:
-                    sys.stderr.write(f'[Detector Error] {e}\n')
-            " 2>&1)
+            NEW_RUN_SIGNAL=$(python3 -c '
+import os, sys, json, urllib.request
 
-            if echo "$NEW_RUN_SIGNAL" | grep -qv "\[Detector Error\]" && [ -n "$NEW_RUN_SIGNAL" ]; then
+repo = os.environ.get("CUR_REPOSITORY") or os.environ.get("GITHUB_REPOSITORY", "")
+token = os.environ.get("GITHUB_TOKEN", "")
+cur_id = int(os.environ.get("CUR_RUN_ID") or os.environ.get("GITHUB_RUN_ID", "0"))
+cur_num = int(os.environ.get("CUR_RUN_NUMBER") or os.environ.get("GITHUB_RUN_NUMBER", "0"))
+active_statuses = ("queued", "in_progress", "waiting", "pending", "requested")
+
+if token and repo:
+    try:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{repo}/actions/runs?per_page=30",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "GarmentFlow-Detector"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=6) as r:
+            runs = json.loads(r.read().decode()).get("workflow_runs", [])
+            newer = [
+                x for x in runs
+                if x.get("status") in active_statuses
+                and x.get("id") != cur_id
+                and (x.get("id", 0) > cur_id or x.get("run_number", 0) > cur_num)
+            ]
+            if newer:
+                first = newer[0]
+                run_id = first.get("id", "")
+                st = first.get("status", "")
+                print(f"{run_id} ({st})")
+    except Exception:
+        pass
+' 2>/dev/null || echo "")
+
+            if [ -n "$NEW_RUN_SIGNAL" ]; then
               echo "=========================================================="
               echo "🚨 NEW WORKFLOW RUN DETECTED (#$NEW_RUN_SIGNAL)!"
               echo "📦 Taking immediate atomic snapshot of MySQL database..."

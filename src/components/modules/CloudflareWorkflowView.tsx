@@ -22,7 +22,7 @@ on:
   #   branches: [ main ]
 
 permissions:
-  actions: read
+  actions: write
   contents: read
 
 jobs:
@@ -69,6 +69,9 @@ jobs:
       - name: ⏳ Wait for Previous Workflow Run to Complete & Save Cache
         env:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+          CUR_RUN_ID: \${{ github.run_id }}
+          CUR_RUN_NUMBER: \${{ github.run_number }}
+          CUR_REPOSITORY: \${{ github.repository }}
         run: |
           echo "=========================================================="
           echo "🔍 CHECKING FOR ACTIVE PREVIOUS WORKFLOW RUNS            "
@@ -76,18 +79,19 @@ jobs:
           python3 -c "
           import os, sys, time, json, urllib.request
 
-          repo = os.environ.get('GITHUB_REPOSITORY', '')
+          repo = os.environ.get('CUR_REPOSITORY') or os.environ.get('GITHUB_REPOSITORY', '')
           token = os.environ.get('GITHUB_TOKEN', '')
-          cur_id = int(os.environ.get('GITHUB_RUN_ID', '0'))
-          cur_num = int(os.environ.get('GITHUB_RUN_NUMBER', '0'))
+          cur_id = int(os.environ.get('CUR_RUN_ID') or os.environ.get('GITHUB_RUN_ID', '0'))
+          cur_num = int(os.environ.get('CUR_RUN_NUMBER') or os.environ.get('GITHUB_RUN_NUMBER', '0'))
 
           if not token or not repo:
               print('ℹ️ GITHUB_TOKEN not available; skipping previous run wait check.')
               sys.exit(0)
 
-          max_wait = 180 # 3 minutes max wait for previous run to complete snapshot
-          poll_interval = 8
+          max_wait = 180 # Up to 3 minutes
+          poll_interval = 6
           elapsed = 0
+          signaled_runs = set()
 
           print(f'Current Run ID: {cur_id} (Run #{cur_num})')
           print('Checking if an earlier workflow run is actively running and saving database cache...')
@@ -95,7 +99,7 @@ jobs:
           while elapsed < max_wait:
               try:
                   req = urllib.request.Request(
-                      f'https://api.github.com/repos/{repo}/actions/runs?per_page=20',
+                      f'https://api.github.com/repos/{repo}/actions/runs?per_page=30',
                       headers={
                           'Authorization': f'Bearer {token}',
                           'Accept': 'application/vnd.github.v3+json',
@@ -105,16 +109,41 @@ jobs:
                   with urllib.request.urlopen(req, timeout=10) as resp:
                       data = json.loads(resp.read().decode())
                       runs = data.get('workflow_runs', [])
+                      active_statuses = ('in_progress', 'queued', 'waiting', 'pending', 'requested')
+                      
+                      # Active older runs
                       active_prev = [
                           r for r in runs 
-                          if r.get('status') == 'in_progress' 
+                          if r.get('status') in active_statuses
                           and r.get('id') != cur_id 
-                          and r.get('run_number', 0) < cur_num
+                          and (r.get('id', 0) < cur_id or r.get('run_number', 0) < cur_num)
                       ]
+
                       if not active_prev:
                           print('✅ No active previous workflow runs detected. Cache is fully saved and safe to restore!')
                           sys.exit(0)
-                      
+
+                      # Signal previous runs to trigger their safe snapshot & exit
+                      for r in active_prev:
+                          pid = r['id']
+                          if pid not in signaled_runs:
+                              print(f'📢 Sending graceful handoff signal to previous active run #{pid} (status: {r.get(\"status\")})...')
+                              try:
+                                  cancel_req = urllib.request.Request(
+                                      f'https://api.github.com/repos/{repo}/actions/runs/{pid}/cancel',
+                                      method='POST',
+                                      headers={
+                                          'Authorization': f'Bearer {token}',
+                                          'Accept': 'application/vnd.github.v3+json',
+                                          'User-Agent': 'GarmentFlow-Coordinator'
+                                      }
+                                  )
+                                  with urllib.request.urlopen(cancel_req, timeout=10) as c_resp:
+                                      print(f'✅ Signal delivered to run #{pid} (HTTP {c_resp.status}). It will now snapshot MySQL into cache.')
+                              except Exception as ce:
+                                  print(f'ℹ️ Note on signal for run #{pid}: {ce}')
+                              signaled_runs.add(pid)
+
                       prev_ids = [str(r['id']) for r in active_prev]
                       print(f'⏳ Previous run(s) active: {prev_ids}. Waiting for safe database snapshot into cache ({elapsed}s / {max_wait}s)...')
               except Exception as e:
@@ -246,55 +275,69 @@ jobs:
         env:
           INPUT_HOURS: \${{ github.event.inputs.duration_hours || '5' }}
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+          CUR_RUN_ID: \${{ github.run_id }}
+          CUR_RUN_NUMBER: \${{ github.run_number }}
+          CUR_REPOSITORY: \${{ github.repository }}
         run: |
           DURATION_HOURS=\${INPUT_HOURS:-5}
-          TOTAL_SECONDS=$((DURATION_HOURS * 3600))
+          TOTAL_SECONDS=\$((DURATION_HOURS * 3600))
           
           echo "=========================================================="
           echo "🟢 Server, GitHub MySQL & Cloudflare Tunnel are LIVE!"
-          echo "⏱️ Target duration: $DURATION_HOURS hour(s) ($TOTAL_SECONDS seconds)"
+          echo "⏱️ Target duration: \$DURATION_HOURS hour(s) (\$TOTAL_SECONDS seconds)"
           echo "💾 Periodic MySQL backup enabled (Every 60s)."
-          echo "👀 Continuous New Run Detection enabled (Every 10s)."
+          echo "👀 Continuous New Run Detection enabled (Every 6s)."
           echo "=========================================================="
           
-          START_TIME=$(date +%s)
+          START_TIME=\$(date +%s)
           LAST_BACKUP=0
           
           while true; do
-            CURRENT_TIME=$(date +%s)
-            ELAPSED=$((CURRENT_TIME - START_TIME))
-            REMAINING=$((TOTAL_SECONDS - ELAPSED))
+            CURRENT_TIME=\$(date +%s)
+            ELAPSED=\$((CURRENT_TIME - START_TIME))
+            REMAINING=\$((TOTAL_SECONDS - ELAPSED))
             
-            if [ $REMAINING -le 0 ]; then
-              echo "✅ Completed target duration of $DURATION_HOURS hour(s)."
+            if [ \$REMAINING -le 0 ]; then
+              echo "✅ Completed target duration of \$DURATION_HOURS hour(s)."
               break
             fi
             
             # 1. Continuous New Run Detector: Checks if a newer workflow run has been triggered
-            NEW_RUN_SIGNAL=$(python3 -c "
-            import os, json, urllib.request
-            repo = os.environ.get('GITHUB_REPOSITORY', '')
+            NEW_RUN_SIGNAL=\$(python3 -c "
+            import os, sys, json, urllib.request
+            repo = os.environ.get('CUR_REPOSITORY') or os.environ.get('GITHUB_REPOSITORY', '')
             token = os.environ.get('GITHUB_TOKEN', '')
-            cur_id = int(os.environ.get('GITHUB_RUN_ID', '0'))
-            cur_num = int(os.environ.get('GITHUB_RUN_NUMBER', '0'))
+            cur_id = int(os.environ.get('CUR_RUN_ID') or os.environ.get('GITHUB_RUN_ID', '0'))
+            cur_num = int(os.environ.get('CUR_RUN_NUMBER') or os.environ.get('GITHUB_RUN_NUMBER', '0'))
+            active_statuses = ('queued', 'in_progress', 'waiting', 'pending', 'requested')
             if token and repo:
                 try:
                     req = urllib.request.Request(
-                        f'https://api.github.com/repos/{repo}/actions/runs?per_page=15',
-                        headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'GarmentFlow-Detector'}
+                        f'https://api.github.com/repos/{repo}/actions/runs?per_page=30',
+                        headers={
+                            'Authorization': f'Bearer {token}',
+                            'Accept': 'application/vnd.github.v3+json',
+                            'User-Agent': 'GarmentFlow-Detector'
+                        }
                     )
                     with urllib.request.urlopen(req, timeout=6) as r:
                         runs = json.loads(r.read().decode()).get('workflow_runs', [])
-                        newer = [x['id'] for x in runs if x.get('status') in ('queued', 'in_progress') and x.get('id') != cur_id and x.get('run_number', 0) > cur_num]
+                        newer = [
+                            x for x in runs
+                            if x.get('status') in active_statuses
+                            and x.get('id') != cur_id
+                            and (x.get('id', 0) > cur_id or x.get('run_number', 0) > cur_num)
+                        ]
                         if newer:
-                            print(','.join(map(str, newer)))
-                except Exception:
-                    pass
-            " 2>/dev/null || echo "")
+                            first = newer[0]
+                            print(f\"{first['id']} ({first.get('status')})\")
+                except Exception as e:
+                    sys.stderr.write(f'[Detector Error] {e}\n')
+            " 2>&1)
 
-            if [ -n "$NEW_RUN_SIGNAL" ]; then
+            if echo "\$NEW_RUN_SIGNAL" | grep -qv "\[Detector Error\]" && [ -n "\$NEW_RUN_SIGNAL" ]; then
               echo "=========================================================="
-              echo "🚨 NEW WORKFLOW RUN DETECTED (#$NEW_RUN_SIGNAL)!"
+              echo "🚨 NEW WORKFLOW RUN DETECTED (#\$NEW_RUN_SIGNAL)!"
               echo "📦 Taking immediate atomic snapshot of MySQL database..."
               echo "=========================================================="
               mkdir -p db_backup
@@ -304,27 +347,27 @@ jobs:
                 --triggers \\
                 --routines \\
                 --databases garmentflow_pro > db_backup/garmentflow_pro.sql 2>/dev/null || true
-              echo "✅ Snapshot ready: $(ls -lh db_backup/garmentflow_pro.sql)"
+              echo "✅ Snapshot ready: \$(ls -lh db_backup/garmentflow_pro.sql)"
               echo "👋 Gracefully stopping server to yield to new workflow run..."
               break
             fi
 
             # 2. Periodic background dump every 60 seconds
-            TIME_SINCE_BACKUP=$((CURRENT_TIME - LAST_BACKUP))
-            if [ $TIME_SINCE_BACKUP -ge 60 ]; then
+            TIME_SINCE_BACKUP=\$((CURRENT_TIME - LAST_BACKUP))
+            if [ \$TIME_SINCE_BACKUP -ge 60 ]; then
               mkdir -p db_backup
               mysqldump -h 127.0.0.1 -P 3306 -u root -proot \\
                 --single-transaction \\
                 --quick \\
                 --databases garmentflow_pro > db_backup/garmentflow_pro.sql 2>/dev/null || true
-              LAST_BACKUP=$CURRENT_TIME
-              ELAPSED_MIN=$((ELAPSED / 60))
-              REMAINING_MIN=$((REMAINING / 60))
-              STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/login || echo "FAIL")
-              echo "💓 Monitor: [Elapsed: \${ELAPSED_MIN}m / Rem: \${REMAINING_MIN}m] | Web: $STATUS | DB Sync: OK"
+              LAST_BACKUP=\$CURRENT_TIME
+              ELAPSED_MIN=\$((ELAPSED / 60))
+              REMAINING_MIN=\$((REMAINING / 60))
+              STATUS=\$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/login || echo "FAIL")
+              echo "💓 Monitor: [Elapsed: \${ELAPSED_MIN}m / Rem: \${REMAINING_MIN}m] | Web: \$STATUS | DB Sync: OK"
             fi
 
-            sleep 10
+            sleep 6
           done
 
       # ================= SAFE DATA CACHE & TEARDOWN ON TIMEOUT, CANCEL OR NEW RUN HANDOFF =================

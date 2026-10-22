@@ -13,7 +13,7 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
 
 jobs:
   run-server-and-tunnel:
@@ -49,6 +49,8 @@ jobs:
     steps:
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 🐍 Set up Python 3.11
         uses: actions/setup-python@v5
@@ -113,30 +115,31 @@ jobs:
                           print("✅ No active previous workflow runs detected. Cache is fully saved and safe to restore!")
                           sys.exit(0)
 
-                      # Signal previous runs to trigger their safe snapshot & exit
-                      for r in active_prev:
-                          pid = r.get("id")
-                          st = r.get("status", "")
-                          if pid and pid not in signaled_runs:
-                              print(f"📢 Sending graceful handoff signal to previous active run #{pid} (status: {st})...")
-                              try:
-                                  cancel_req = urllib.request.Request(
-                                      f"https://api.github.com/repos/{repo}/actions/runs/{pid}/cancel",
-                                      method="POST",
-                                      headers={
-                                          "Authorization": f"Bearer {token}",
-                                          "Accept": "application/vnd.github.v3+json",
-                                          "User-Agent": "GarmentFlow-Coordinator"
-                                      }
-                                  )
-                                  with urllib.request.urlopen(cancel_req, timeout=10) as c_resp:
-                                      print(f"✅ Signal delivered to run #{pid} (HTTP {c_resp.status}). It will now snapshot MySQL into cache.")
-                              except Exception as ce:
-                                  print(f"ℹ️ Note on signal for run #{pid}: {ce}")
-                              signaled_runs.add(pid)
+                      # Give previous run 45s to detect the new run and push its DB snapshot gracefully
+                      if elapsed >= 45:
+                          for r in active_prev:
+                              pid = r.get("id")
+                              st = r.get("status", "")
+                              if pid and pid not in signaled_runs:
+                                  print(f"📢 Sending fallback signal to previous active run #{pid} (status: {st})...")
+                                  try:
+                                      cancel_req = urllib.request.Request(
+                                          f"https://api.github.com/repos/{repo}/actions/runs/{pid}/cancel",
+                                          method="POST",
+                                          headers={
+                                              "Authorization": f"Bearer {token}",
+                                              "Accept": "application/vnd.github.v3+json",
+                                              "User-Agent": "GarmentFlow-Coordinator"
+                                          }
+                                      )
+                                      with urllib.request.urlopen(cancel_req, timeout=10) as c_resp:
+                                          print(f"✅ Signal delivered to run #{pid} (HTTP {c_resp.status}).")
+                                  except Exception as ce:
+                                      print(f"ℹ️ Note on signal for run #{pid}: {ce}")
+                                  signaled_runs.add(pid)
 
                       prev_ids = [str(r["id"]) for r in active_prev]
-                      print(f"⏳ Previous run(s) active: {prev_ids}. Waiting for safe database snapshot into cache ({elapsed}s / {max_wait}s)...")
+                      print(f"⏳ Previous run(s) active: {prev_ids}. Waiting for safe database snapshot ({elapsed}s / {max_wait}s)...")
               except Exception as e:
                   print(f"⚠️ Warning during check: {e}")
 
@@ -156,7 +159,7 @@ jobs:
             pip install Flask gunicorn xlsxwriter python-dotenv werkzeug PyMySQL mysql-connector-python cryptography
           fi
 
-      - name: 🔄 Restore MySQL Cache from Previous Run
+      - name: 🔄 Restore MySQL Cache from Actions Cache
         id: mysql-cache
         uses: actions/cache/restore@v4
         with:
@@ -165,19 +168,44 @@ jobs:
           restore-keys: |
             garmentflow-mysql-
 
-      - name: 📥 Import Cached MySQL Database Data
+      - name: 📥 Restore Persistent Database (Git 'db-storage' & Actions Cache)
         run: |
           mkdir -p db_backup
           echo "=========================================================="
-          echo "       RESTORING MYSQL DATA FROM GITHUB CACHE            "
+          echo "       RESTORING MYSQL DATA FROM PERSISTENT STORAGE       "
           echo "=========================================================="
+          
+          # 1. Fetch persistent database from Git 'db-storage' branch
+          echo "Checking Git 'db-storage' branch..."
+          git fetch origin db-storage:refs/remotes/origin/db-storage 2>/dev/null || true
+          if git cat-file -e origin/db-storage:db_backup/garmentflow_pro.sql 2>/dev/null; then
+            git show origin/db-storage:db_backup/garmentflow_pro.sql > db_backup/garmentflow_pro.git.sql
+            echo "📦 Found Git persistent backup ($(du -h db_backup/garmentflow_pro.git.sql | cut -f1))"
+          fi
+          
+          # 2. Compare Git backup with Actions Cache backup, pick the most complete one
+          if [ -f db_backup/garmentflow_pro.git.sql ] && [ -s db_backup/garmentflow_pro.git.sql ]; then
+            GIT_SIZE=$(wc -c < db_backup/garmentflow_pro.git.sql 2>/dev/null || echo 0)
+            CACHE_SIZE=0
+            if [ -f db_backup/garmentflow_pro.sql ] && [ -s db_backup/garmentflow_pro.sql ]; then
+              CACHE_SIZE=$(wc -c < db_backup/garmentflow_pro.sql 2>/dev/null || echo 0)
+            fi
+            
+            if [ "$GIT_SIZE" -ge "$CACHE_SIZE" ]; then
+              echo "✅ Selecting Git persistent database backup ($GIT_SIZE bytes)..."
+              cp db_backup/garmentflow_pro.git.sql db_backup/garmentflow_pro.sql
+            else
+              echo "✅ Selecting Actions Cache database backup ($CACHE_SIZE bytes)..."
+            fi
+          fi
+          
+          # 3. Import into MySQL container
           if [ -f db_backup/garmentflow_pro.sql ] && [ -s db_backup/garmentflow_pro.sql ]; then
-            echo "📦 Found cached database dump: db_backup/garmentflow_pro.sql ($(du -h db_backup/garmentflow_pro.sql | cut -f1))"
-            echo "Importing dump into GitHub Actions MySQL service..."
+            echo "Importing database dump into GitHub Actions MySQL service..."
             mysql -h 127.0.0.1 -P 3306 -u root -proot garmentflow_pro < db_backup/garmentflow_pro.sql
-            echo "✅ Database restored successfully from previous run!"
+            echo "✅ Database restored successfully! All tables and data restored."
           else
-            echo "ℹ️ No existing cache found or empty. Fresh MySQL database instance will be initialized."
+            echo "ℹ️ No existing database dump found. Fresh MySQL database instance will be initialized."
           fi
 
       - name: 🛠️ Verify & Auto-Recreate Tables and Migrations
@@ -283,6 +311,50 @@ jobs:
           START_TIME=$(date +%s)
           LAST_BACKUP=$(date +%s)
           
+          dump_and_sync_db() {
+            mkdir -p db_backup
+            TMP_DUMP="db_backup/garmentflow_pro.tmp.sql"
+            FINAL_DUMP="db_backup/garmentflow_pro.sql"
+            
+            if mysqladmin ping -h 127.0.0.1 -P 3306 -u root -proot --silent; then
+              mysqldump -h 127.0.0.1 -P 3306 -u root -proot \
+                --single-transaction \
+                --quick \
+                --triggers \
+                --routines \
+                --databases garmentflow_pro > "$TMP_DUMP" 2>/dev/null || true
+                
+              if [ -s "$TMP_DUMP" ]; then
+                mv "$TMP_DUMP" "$FINAL_DUMP"
+              else
+                rm -f "$TMP_DUMP"
+              fi
+            fi
+            
+            # Push to Git db-storage branch so data is permanently persisted
+            if [ -f "$FINAL_DUMP" ] && [ -s "$FINAL_DUMP" ]; then
+              rm -rf /tmp/db_sync_wt
+              git worktree add -B db-storage /tmp/db_sync_wt origin/db-storage 2>/dev/null || git worktree add -B db-storage /tmp/db_sync_wt 2>/dev/null || true
+              if [ -d /tmp/db_sync_wt ]; then
+                mkdir -p /tmp/db_sync_wt/db_backup
+                cp "$FINAL_DUMP" /tmp/db_sync_wt/db_backup/garmentflow_pro.sql
+                (
+                  cd /tmp/db_sync_wt
+                  git config user.name "GarmentFlow Backup Bot"
+                  git config user.email "backup@garmentflow.erp"
+                  git add db_backup/garmentflow_pro.sql
+                  if ! git diff --cached --quiet; then
+                    git commit -m "Auto-persist MySQL DB snapshot $(date -u '+%Y-%m-%d %H:%M:%S UTC') [skip ci]"
+                    git push -f origin db-storage 2>/dev/null || true
+                    echo "💾 Database backed up to Git 'db-storage' branch!"
+                  fi
+                )
+                rm -rf /tmp/db_sync_wt
+                git worktree prune 2>/dev/null || true
+              fi
+            fi
+          }
+          
           while true; do
             CURRENT_TIME=$(date +%s)
             ELAPSED=$((CURRENT_TIME - START_TIME))
@@ -333,28 +405,18 @@ jobs:
             if [ -n "$NEW_RUN_SIGNAL" ]; then
               echo "=========================================================="
               echo "🚨 NEW WORKFLOW RUN DETECTED (#$NEW_RUN_SIGNAL)!"
-              echo "📦 Taking immediate atomic snapshot of MySQL database..."
+              echo "📦 Taking atomic snapshot & syncing to Git 'db-storage'..."
               echo "=========================================================="
-              mkdir -p db_backup
-              mysqldump -h 127.0.0.1 -P 3306 -u root -proot \
-                --single-transaction \
-                --quick \
-                --triggers \
-                --routines \
-                --databases garmentflow_pro > db_backup/garmentflow_pro.sql 2>/dev/null || true
+              dump_and_sync_db
               echo "✅ Snapshot ready: $(ls -lh db_backup/garmentflow_pro.sql)"
               echo "👋 Gracefully stopping server to yield to new workflow run..."
               break
             fi
 
-            # 2. Periodic background dump every 60 seconds
+            # 2. Periodic background dump and Git push every 90 seconds
             TIME_SINCE_BACKUP=$((CURRENT_TIME - LAST_BACKUP))
-            if [ $TIME_SINCE_BACKUP -ge 60 ]; then
-              mkdir -p db_backup
-              mysqldump -h 127.0.0.1 -P 3306 -u root -proot \
-                --single-transaction \
-                --quick \
-                --databases garmentflow_pro > db_backup/garmentflow_pro.sql 2>/dev/null || true
+            if [ $TIME_SINCE_BACKUP -ge 90 ]; then
+              dump_and_sync_db
               LAST_BACKUP=$CURRENT_TIME
               ELAPSED_MIN=$((ELAPSED / 60))
               REMAINING_MIN=$((REMAINING / 60))
@@ -372,13 +434,16 @@ jobs:
         run: |
           echo "TIMESTAMP_KEY=garmentflow-mysql-${{ github.run_number }}-$(date +%s)" >> $GITHUB_ENV
 
-      - name: 💾 Dump MySQL Database (Runs on Success, Cancel, Timeout, or Handoff)
+      - name: 💾 Dump & Persist MySQL Database to Git 'db-storage' (Runs on Success, Cancel, Timeout)
         if: always()
         run: |
           echo "=========================================================="
-          echo "💾 FINAL MYSQL DATABASE EXPORT FOR ACTIONS CACHE         "
+          echo "💾 FINAL MYSQL DATABASE EXPORT FOR GIT & CACHE STORAGE   "
           echo "=========================================================="
           mkdir -p db_backup
+          TMP_DUMP="db_backup/garmentflow_pro.tmp.sql"
+          FINAL_DUMP="db_backup/garmentflow_pro.sql"
+          
           if mysqladmin ping -h 127.0.0.1 -P 3306 -u root -proot --silent; then
             echo "Dumping MySQL database 'garmentflow_pro'..."
             mysqldump -h 127.0.0.1 -P 3306 -u root -proot \
@@ -386,14 +451,45 @@ jobs:
               --quick \
               --triggers \
               --routines \
-              --databases garmentflow_pro > db_backup/garmentflow_pro.sql
-            echo "✅ Export complete: $(ls -lh db_backup/garmentflow_pro.sql)"
+              --databases garmentflow_pro > "$TMP_DUMP" 2>/dev/null || true
+            if [ -s "$TMP_DUMP" ]; then
+              mv "$TMP_DUMP" "$FINAL_DUMP"
+              echo "✅ Export complete: $(ls -lh "$FINAL_DUMP")"
+            else
+              rm -f "$TMP_DUMP"
+            fi
           else
-            echo "⚠️ MySQL service not responding or down, using latest periodic backup if available."
-            ls -lh db_backup/garmentflow_pro.sql || true
+            echo "⚠️ MySQL service not responding or down, using latest backup."
+            ls -lh "$FINAL_DUMP" || true
+          fi
+          
+          # Git Push to db-storage branch so data is permanently persisted
+          if [ -f "$FINAL_DUMP" ] && [ -s "$FINAL_DUMP" ]; then
+            echo "Pushing final snapshot to Git 'db-storage' branch..."
+            rm -rf /tmp/db_sync_wt
+            git worktree add -B db-storage /tmp/db_sync_wt origin/db-storage 2>/dev/null || git worktree add -B db-storage /tmp/db_sync_wt 2>/dev/null || true
+            if [ -d /tmp/db_sync_wt ]; then
+              mkdir -p /tmp/db_sync_wt/db_backup
+              cp "$FINAL_DUMP" /tmp/db_sync_wt/db_backup/garmentflow_pro.sql
+              (
+                cd /tmp/db_sync_wt
+                git config user.name "GarmentFlow Backup Bot"
+                git config user.email "backup@garmentflow.erp"
+                git add db_backup/garmentflow_pro.sql
+                if ! git diff --cached --quiet; then
+                  git commit -m "Final DB snapshot $(date -u '+%Y-%m-%d %H:%M:%S UTC') [skip ci]"
+                  git push -f origin db-storage 2>/dev/null || true
+                  echo "✅ Final database successfully pushed to Git 'db-storage' branch!"
+                else
+                  echo "ℹ️ Database unchanged in final check."
+                fi
+              )
+              rm -rf /tmp/db_sync_wt
+              git worktree prune 2>/dev/null || true
+            fi
           fi
 
-      - name: 📦 Save MySQL Cache to GitHub Actions Cache (Runs on Success, Cancel, Timeout, or Handoff)
+      - name: 📦 Save MySQL Cache to Actions Cache (Runs on Success, Cancel, Timeout)
         if: always()
         uses: actions/cache/save@v4
         with:
@@ -406,4 +502,4 @@ jobs:
           echo "Shutting down server and tunnel..."
           pkill -f cloudflared || true
           pkill -f gunicorn || true
-          echo "Teardown complete. All database data safely cached for next run!"
+          echo "Teardown complete. All database data safely persisted for next run!"

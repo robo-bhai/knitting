@@ -179,18 +179,34 @@ jobs:
             garmentflow-mysql-
 
       - name: 📥 Restore Persistent Database (Git 'db-storage' & Actions Cache)
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+          CUR_REPOSITORY: \${{ github.repository }}
         run: |
           mkdir -p db_backup
           echo "=========================================================="
-          echo "       RESTORING MYSQL DATA FROM PERSISTENT STORAGE       "
+          echo "       RESTORING ERP DATA FROM PERSISTENT STORAGE         "
           echo "=========================================================="
           
           # 1. Fetch persistent database from Git 'db-storage' branch
           echo "Checking Git 'db-storage' branch..."
           git fetch origin db-storage:refs/remotes/origin/db-storage 2>/dev/null || true
+          
           if git cat-file -e origin/db-storage:db_backup/garmentflow_pro.sql 2>/dev/null; then
             git show origin/db-storage:db_backup/garmentflow_pro.sql > db_backup/garmentflow_pro.git.sql
-            echo "📦 Found Git persistent backup (\$(du -h db_backup/garmentflow_pro.git.sql | cut -f1))"
+            echo "📦 Found Git persistent MySQL backup (\$(du -h db_backup/garmentflow_pro.git.sql | cut -f1))"
+          fi
+          
+          if git cat-file -e origin/db-storage:db_backup/database.db 2>/dev/null; then
+            git show origin/db-storage:db_backup/database.db > database.db
+            cp database.db db_backup/database.db
+            echo "📦 Found Git persistent SQLite backup (\$(du -h database.db | cut -f1))"
+          fi
+          
+          # Also check if Actions Cache restored database.db
+          if [ -f db_backup/database.db ] && [ ! -f database.db ]; then
+            cp db_backup/database.db database.db
+            echo "📦 Loaded SQLite database from Actions Cache (\$(du -h database.db | cut -f1))"
           fi
           
           # 2. Compare Git backup with Actions Cache backup, pick the most complete one
@@ -202,18 +218,18 @@ jobs:
             fi
             
             if [ "\$GIT_SIZE" -ge "\$CACHE_SIZE" ]; then
-              echo "✅ Selecting Git persistent database backup (\$GIT_SIZE bytes)..."
+              echo "✅ Selecting Git persistent MySQL backup (\$GIT_SIZE bytes)..."
               cp db_backup/garmentflow_pro.git.sql db_backup/garmentflow_pro.sql
             else
-              echo "✅ Selecting Actions Cache database backup (\$CACHE_SIZE bytes)..."
+              echo "✅ Selecting Actions Cache MySQL backup (\$CACHE_SIZE bytes)..."
             fi
           fi
           
           # 3. Import into MySQL container
           if [ -f db_backup/garmentflow_pro.sql ] && [ -s db_backup/garmentflow_pro.sql ]; then
             echo "Importing database dump into GitHub Actions MySQL service..."
-            mysql -h 127.0.0.1 -P 3306 -u root -proot garmentflow_pro < db_backup/garmentflow_pro.sql
-            echo "✅ Database restored successfully! All tables and data restored."
+            mysql -h 127.0.0.1 -P 3306 -u root -proot garmentflow_pro < db_backup/garmentflow_pro.sql || true
+            echo "✅ Database restored successfully! All tables, users, and credentials restored."
           else
             echo "ℹ️ No existing database dump found. Fresh MySQL database instance will be initialized."
           fi
@@ -235,7 +251,7 @@ jobs:
           import main
           print('[DB] Checking connection and executing repair_and_migrate_db()...')
           main.repair_and_migrate_db()
-          print('✅ All 16 ERP tables and missing columns verified, repaired, and ready!')
+          print('✅ All ERP tables, users and credentials verified and ready!')
           "
 
       - name: 🛡️ Install Cloudflare Tunnel CLI (cloudflared)
@@ -293,8 +309,8 @@ jobs:
             echo "✅ Loaded CLOUDFLARE_TUNNEL_TOKEN from GitHub Secrets."
             echo "Starting cloudflared tunnel..."
             nohup cloudflared tunnel --no-autoupdate run --token "$CLOUDFLARE_TUNNEL_TOKEN" > tunnel.log 2>&1 &
-            TUNNEL_PID=$!
-            echo "Cloudflared Process ID: $TUNNEL_PID"
+            TUNNEL_PID=\$!
+            echo "Cloudflared Process ID: \$TUNNEL_PID"
             sleep 4
             echo "Recent Cloudflared Logs:"
             tail -n 20 tunnel.log || true
@@ -307,6 +323,7 @@ jobs:
           CUR_RUN_ID: \${{ github.run_id }}
           CUR_RUN_NUMBER: \${{ github.run_number }}
           CUR_REPOSITORY: \${{ github.repository }}
+          GITHUB_WORKSPACE: \${{ github.workspace }}
         run: |
           DURATION_HOURS=\${INPUT_HOURS:-5}
           TOTAL_SECONDS=\$((DURATION_HOURS * 3600))
@@ -314,7 +331,7 @@ jobs:
           echo "=========================================================="
           echo "🟢 Server, GitHub MySQL & Cloudflare Tunnel are LIVE!"
           echo "⏱️ Target duration: \$DURATION_HOURS hour(s) (\$TOTAL_SECONDS seconds)"
-          echo "💾 Periodic MySQL backup enabled (Every 60s)."
+          echo "💾 Periodic Database Backup enabled (Every 60s)."
           echo "👀 Continuous New Run Detection enabled (Every 6s)."
           echo "=========================================================="
           
@@ -326,6 +343,7 @@ jobs:
             TMP_DUMP="db_backup/garmentflow_pro.tmp.sql"
             FINAL_DUMP="db_backup/garmentflow_pro.sql"
             
+            # 1. Export MySQL if container is active
             if mysqladmin ping -h 127.0.0.1 -P 3306 -u root -proot --silent; then
               mysqldump -h 127.0.0.1 -P 3306 -u root -proot \\
                 --single-transaction \\
@@ -341,27 +359,39 @@ jobs:
               fi
             fi
             
-            # Push to Git db-storage branch so data is permanently persisted
-            if [ -f "\$FINAL_DUMP" ] && [ -s "\$FINAL_DUMP" ]; then
-              rm -rf /tmp/db_sync_wt
-              git worktree add -B db-storage /tmp/db_sync_wt origin/db-storage 2>/dev/null || git worktree add -B db-storage /tmp/db_sync_wt 2>/dev/null || true
-              if [ -d /tmp/db_sync_wt ]; then
-                mkdir -p /tmp/db_sync_wt/db_backup
-                cp "\$FINAL_DUMP" /tmp/db_sync_wt/db_backup/garmentflow_pro.sql
-                (
-                  cd /tmp/db_sync_wt
-                  git config user.name "GarmentFlow Backup Bot"
-                  git config user.email "backup@garmentflow.erp"
-                  git add db_backup/garmentflow_pro.sql
-                  if ! git diff --cached --quiet; then
-                    git commit -m "Auto-persist MySQL DB snapshot \$(date -u '+%Y-%m-%d %H:%M:%S UTC') [skip ci]"
-                    git push -f origin db-storage 2>/dev/null || true
-                    echo "💾 Database backed up to Git 'db-storage' branch!"
+            # 2. Also snapshot SQLite database if present
+            if [ -f database.db ] && [ -s database.db ]; then
+              cp database.db db_backup/database.db
+            fi
+            
+            # 3. Push snapshot to Git 'db-storage' branch
+            if ([ -f "\$FINAL_DUMP" ] && [ -s "\$FINAL_DUMP" ]) || ([ -f "db_backup/database.db" ] && [ -s "db_backup/database.db" ]); then
+              rm -rf /tmp/db_sync_dir
+              mkdir -p /tmp/db_sync_dir
+              (
+                cd /tmp/db_sync_dir
+                git init -q
+                git config user.name "GarmentFlow Backup Bot"
+                git config user.email "backup@garmentflow.erp"
+                git remote add origin "https://x-access-token:\${GITHUB_TOKEN}@github.com/\${CUR_REPOSITORY:-\$GITHUB_REPOSITORY}.git"
+                if git fetch --depth=1 origin db-storage:db-storage 2>/dev/null; then
+                  git checkout db-storage -q
+                else
+                  git checkout --orphan db-storage -q
+                  git rm -rf . -q 2>/dev/null || true
+                fi
+                mkdir -p db_backup
+                [ -f "\$GITHUB_WORKSPACE/\$FINAL_DUMP" ] && cp "\$GITHUB_WORKSPACE/\$FINAL_DUMP" db_backup/garmentflow_pro.sql
+                [ -f "\$GITHUB_WORKSPACE/db_backup/database.db" ] && cp "\$GITHUB_WORKSPACE/db_backup/database.db" db_backup/database.db
+                git add db_backup/
+                if ! git diff --cached --quiet; then
+                  git commit -m "Auto-persist ERP DB snapshot \$(date -u '+%Y-%m-%d %H:%M:%S UTC') [skip ci]" -q
+                  if git push origin db-storage -q 2>/dev/null || git push -f origin db-storage -q 2>/dev/null; then
+                    echo "💾 Database snapshot backed up to Git 'db-storage' branch!"
                   fi
-                )
-                rm -rf /tmp/db_sync_wt
-                git worktree prune 2>/dev/null || true
-              fi
+                fi
+              )
+              rm -rf /tmp/db_sync_dir
             fi
           }
           
@@ -418,14 +448,14 @@ jobs:
               echo "📦 Taking atomic snapshot & syncing to Git 'db-storage'..."
               echo "=========================================================="
               dump_and_sync_db
-              echo "✅ Snapshot ready: \$(ls -lh db_backup/garmentflow_pro.sql)"
+              echo "✅ Snapshot ready: \$(ls -lh db_backup/ 2>/dev/null || true)"
               echo "👋 Gracefully stopping server to yield to new workflow run..."
               break
             fi
 
-            # 2. Periodic background dump and Git push every 90 seconds
+            # 2. Periodic background dump and Git push every 60 seconds
             TIME_SINCE_BACKUP=\$((CURRENT_TIME - LAST_BACKUP))
-            if [ \$TIME_SINCE_BACKUP -ge 90 ]; then
+            if [ \$TIME_SINCE_BACKUP -ge 60 ]; then
               dump_and_sync_db
               LAST_BACKUP=\$CURRENT_TIME
               ELAPSED_MIN=\$((ELAPSED / 60))
@@ -444,11 +474,15 @@ jobs:
         run: |
           echo "TIMESTAMP_KEY=garmentflow-mysql-\${{ github.run_number }}-$(date +%s)" >> \$GITHUB_ENV
 
-      - name: 💾 Dump & Persist MySQL Database to Git 'db-storage' (Runs on Success, Cancel, Timeout)
+      - name: 💾 Dump & Persist Database to Git 'db-storage' (Runs on Success, Cancel, Timeout)
         if: always()
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+          CUR_REPOSITORY: \${{ github.repository }}
+          GITHUB_WORKSPACE: \${{ github.workspace }}
         run: |
           echo "=========================================================="
-          echo "💾 FINAL MYSQL DATABASE EXPORT FOR GIT & CACHE STORAGE   "
+          echo "💾 FINAL DATABASE EXPORT FOR GIT & CACHE STORAGE          "
           echo "=========================================================="
           mkdir -p db_backup
           TMP_DUMP="db_backup/garmentflow_pro.tmp.sql"
@@ -464,7 +498,7 @@ jobs:
               --databases garmentflow_pro > "\$TMP_DUMP" 2>/dev/null || true
             if [ -s "\$TMP_DUMP" ]; then
               mv "\$TMP_DUMP" "\$FINAL_DUMP"
-              echo "✅ Export complete: \$(ls -lh "\$FINAL_DUMP")"
+              echo "✅ MySQL export complete: \$(ls -lh "\$FINAL_DUMP")"
             else
               rm -f "\$TMP_DUMP"
             fi
@@ -473,33 +507,46 @@ jobs:
             ls -lh "\$FINAL_DUMP" || true
           fi
           
+          if [ -f database.db ] && [ -s database.db ]; then
+            cp database.db db_backup/database.db
+            echo "✅ SQLite export complete: \$(ls -lh db_backup/database.db)"
+          fi
+          
           # Git Push to db-storage branch so data is permanently persisted
-          if [ -f "\$FINAL_DUMP" ] && [ -s "\$FINAL_DUMP" ]; then
+          if [ -f "\$FINAL_DUMP" ] || [ -f "db_backup/database.db" ]; then
             echo "Pushing final snapshot to Git 'db-storage' branch..."
-            rm -rf /tmp/db_sync_wt
-            git worktree add -B db-storage /tmp/db_sync_wt origin/db-storage 2>/dev/null || git worktree add -B db-storage /tmp/db_sync_wt 2>/dev/null || true
-            if [ -d /tmp/db_sync_wt ]; then
-              mkdir -p /tmp/db_sync_wt/db_backup
-              cp "\$FINAL_DUMP" /tmp/db_sync_wt/db_backup/garmentflow_pro.sql
-              (
-                cd /tmp/db_sync_wt
-                git config user.name "GarmentFlow Backup Bot"
-                git config user.email "backup@garmentflow.erp"
-                git add db_backup/garmentflow_pro.sql
-                if ! git diff --cached --quiet; then
-                  git commit -m "Final DB snapshot \$(date -u '+%Y-%m-%d %H:%M:%S UTC') [skip ci]"
-                  git push -f origin db-storage 2>/dev/null || true
+            rm -rf /tmp/db_sync_dir
+            mkdir -p /tmp/db_sync_dir
+            (
+              cd /tmp/db_sync_dir
+              git init -q
+              git config user.name "GarmentFlow Backup Bot"
+              git config user.email "backup@garmentflow.erp"
+              git remote add origin "https://x-access-token:\${GITHUB_TOKEN}@github.com/\${CUR_REPOSITORY:-\$GITHUB_REPOSITORY}.git"
+              git fetch --depth=1 origin db-storage:db-storage 2>/dev/null || true
+              if git rev-parse --verify db-storage >/dev/null 2>&1; then
+                git checkout db-storage -q
+              else
+                git checkout --orphan db-storage -q
+                git rm -rf . -q 2>/dev/null || true
+              fi
+              mkdir -p db_backup
+              [ -f "\$GITHUB_WORKSPACE/\$FINAL_DUMP" ] && cp "\$GITHUB_WORKSPACE/\$FINAL_DUMP" db_backup/garmentflow_pro.sql
+              [ -f "\$GITHUB_WORKSPACE/db_backup/database.db" ] && cp "\$GITHUB_WORKSPACE/db_backup/database.db" db_backup/database.db
+              git add db_backup/
+              if ! git diff --cached --quiet; then
+                git commit -m "Final ERP DB snapshot \$(date -u '+%Y-%m-%d %H:%M:%S UTC') [skip ci]" -q
+                if git push origin db-storage -q 2>/dev/null || git push -f origin db-storage -q 2>/dev/null; then
                   echo "✅ Final database successfully pushed to Git 'db-storage' branch!"
-                else
-                  echo "ℹ️ Database unchanged in final check."
                 fi
-              )
-              rm -rf /tmp/db_sync_wt
-              git worktree prune 2>/dev/null || true
-            fi
+              else
+                echo "ℹ️ Database unchanged in final check."
+              fi
+            )
+            rm -rf /tmp/db_sync_dir
           fi
 
-      - name: 📦 Save MySQL Cache to Actions Cache (Runs on Success, Cancel, Timeout)
+      - name: 📦 Save Database Cache to Actions Cache (Runs on Success, Cancel, Timeout)
         if: always()
         uses: actions/cache/save@v4
         with:

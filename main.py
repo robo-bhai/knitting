@@ -21,6 +21,7 @@ MYSQL_PORT = int(os.getenv("MYSQL_PORT", 3306))
 MYSQL_USER = os.getenv("MYSQL_USER", "root")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
 MYSQL_DB = os.getenv("MYSQL_DB", "garmentflow_pro")
+MYSQL_SSL = os.getenv("MYSQL_SSL", "false").lower() in ("true", "1", "yes")
 SQLITE_DB = os.getenv("SQLITE_DB", "database.db")
 
 # Admin credentials loaded from environment / GitHub secrets
@@ -102,7 +103,9 @@ def db():
     if DB_TYPE == "mysql" and MYSQL_AVAILABLE:
         try:
             # First attempt connection via PyMySQL
-            if 'pymysql' in sys.modules:
+            try:
+                import pymysql
+                import pymysql.cursors
                 ssl_dict = {'ssl': {}} if MYSQL_SSL else {}
                 conn = pymysql.connect(
                     host=MYSQL_HOST,
@@ -113,10 +116,11 @@ def db():
                     charset='utf8mb4',
                     cursorclass=pymysql.cursors.DictCursor,
                     autocommit=False,
+                    connect_timeout=10,
                     **ssl_dict
                 )
                 return MySQLConnectionWrapper(conn)
-            elif 'mysql.connector' in sys.modules:
+            except ImportError:
                 import mysql.connector
                 conn = mysql.connector.connect(
                     host=MYSQL_HOST,
@@ -124,7 +128,8 @@ def db():
                     user=MYSQL_USER,
                     password=MYSQL_PASSWORD,
                     database=MYSQL_DB,
-                    charset='utf8mb4'
+                    charset='utf8mb4',
+                    connection_timeout=10
                 )
                 return MySQLConnectionWrapper(conn)
         except Exception as e:
@@ -415,6 +420,51 @@ def repair_and_migrate_db():
             print(f"[DB] Admin user '{ADMIN_USERNAME}' verified and synced with environment secrets.")
     except Exception as e:
         print(f"[DB SEED ERROR] {e}")
+
+    # 4. Seamless Data Recovery: If connected to MySQL and local SQLite (database.db) has existing records, migrate all data into MySQL
+    if is_mysql and os.path.exists(SQLITE_DB) and os.path.getsize(SQLITE_DB) > 0:
+        try:
+            import sqlite3
+            s_con = sqlite3.connect(SQLITE_DB)
+            s_con.row_factory = sqlite3.Row
+            s_cur = s_con.cursor()
+
+            s_cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+            sqlite_tables = [r[0] for r in s_cur.fetchall()]
+
+            for tbl in ['users', 'hr_staff', 'hr_ledger', 'hr_attendance', 'work_orders', 'plans', 'bags', 'lots', 'jobs', 'fabric_rolls', 'machine_assignments', 'quality_checks', 'finalized_bags', 'dispatch_records', 'rolls', 'downtime', 'yarn', 'production', 'faults', 'operators', 'samples']:
+                if tbl in sqlite_tables:
+                    try:
+                        cur.execute(f"SELECT COUNT(*) FROM {tbl}")
+                        m_cnt = cur.fetchone()
+                        m_count = m_cnt['COUNT(*)'] if isinstance(m_cnt, dict) else m_cnt[0]
+
+                        s_cur.execute(f"SELECT COUNT(*) FROM {tbl}")
+                        s_cnt = s_cur.fetchone()
+                        s_count = s_cnt['COUNT(*)'] if isinstance(s_cnt, dict) else s_cnt[0]
+
+                        if s_count > 0 and (m_count == 0 or (tbl == 'users' and m_count <= 1)):
+                            s_cur.execute(f"SELECT * FROM {tbl}")
+                            s_rows = s_cur.fetchall()
+                            migrated_count = 0
+                            for row in s_rows:
+                                row_dict = dict(row)
+                                cols = list(row_dict.keys())
+                                vals = list(row_dict.values())
+                                placeholders = ", ".join(["%s"] * len(cols))
+                                col_names = ", ".join([f"`{c}`" for c in cols])
+                                if tbl == 'users':
+                                    cur.execute(f"INSERT INTO {tbl} ({col_names}) VALUES ({placeholders}) ON DUPLICATE KEY UPDATE password=VALUES(password), role=VALUES(role)", vals)
+                                else:
+                                    cur.execute(f"INSERT IGNORE INTO {tbl} ({col_names}) VALUES ({placeholders})", vals)
+                                migrated_count += 1
+                            con.commit()
+                            print(f"[DB MIGRATION] Safely imported {migrated_count} records from SQLite into MySQL for table '{tbl}'.")
+                    except Exception as err:
+                        print(f"[DB MIGRATION NOTICE] Table {tbl}: {err}")
+            s_con.close()
+        except Exception as e:
+            print(f"[DB MIGRATION WARNING] Failed auto-sync from SQLite to MySQL: {e}")
 
     con.close()
     print("[DB] Schema repair & verification complete.")

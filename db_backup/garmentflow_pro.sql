@@ -543,7 +543,7 @@ CREATE TABLE `users` (
   `role` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `username` (`username`)
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -552,7 +552,7 @@ CREATE TABLE `users` (
 
 LOCK TABLES `users` WRITE;
 /*!40000 ALTER TABLE `users` DISABLE KEYS */;
-INSERT INTO `users` VALUES (1,'admin','admin123','admin'),(2,'c1234','cp1234','clerk'),(3,'i1234','ip1234','incharge'),(4,'m1234','mp1234','manager');
+INSERT INTO `users` VALUES (1,'admin','admin123','admin'),(2,'c1234','cp1234','clerk'),(3,'i1234','ip1234','incharge'),(4,'m1234','mp1234','manager'),(5,'noman@ikram','hadi1.5)','admin');
 /*!40000 ALTER TABLE `users` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -567,7 +567,7 @@ CREATE TABLE `work_orders` (
   `id` int NOT NULL AUTO_INCREMENT,
   `work_order` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -576,7 +576,7 @@ CREATE TABLE `work_orders` (
 
 LOCK TABLES `work_orders` WRITE;
 /*!40000 ALTER TABLE `work_orders` DISABLE KEYS */;
-INSERT INTO `work_orders` VALUES (1,'22398');
+INSERT INTO `work_orders` VALUES (1,'22398'),(2,'22398');
 /*!40000 ALTER TABLE `work_orders` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -619,4 +619,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-10-23  5:29:20
+-- Dump completed on 2026-10-23 10:09:41

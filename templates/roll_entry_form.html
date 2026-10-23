@@ -10,7 +10,7 @@
         Feed Fabric Roll (/roll-entry/form)
       </h1>
       <p class="text-xs text-slate-500 mt-1">
-        Type or select Work Order to auto-cascade Plans, Bags, Lots, and Needles.
+        Only Work Orders with complete series (WO &gt; Plan &gt; Bag &gt; Lot &amp; 5-Digit Machine Sign) are allowed.
       </p>
     </div>
     <a href="{{ url_for('roll_entry') }}" class="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200 font-medium">
@@ -40,7 +40,7 @@
               <option value="{{ wo }}">{{ wo }}</option>
             {% endfor %}
           </datalist>
-          <p class="text-[10px] text-slate-500 mt-1">Select from list or type WO</p>
+          <p class="text-[10px] text-slate-500 mt-1">Complete series WOs only</p>
         </div>
 
         <div>
@@ -64,7 +64,7 @@
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label class="block text-xs font-semibold text-slate-700 mb-1">
-            3. Bag & Shade <span class="text-rose-500">*</span>
+            3. Bag &amp; Shade <span class="text-rose-500">*</span>
           </label>
           <select 
             name="bag" 
@@ -95,8 +95,23 @@
         </div>
       </div>
 
-      <!-- 3. Needles & Barcode -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <!-- 3. Machine Barcode (5-Digit) & Needles -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            Machine Barcode (5-Digit) <span class="text-rose-500">*</span>
+          </label>
+          <input 
+            type="text" 
+            name="barcode" 
+            id="form_machine_barcode" 
+            required 
+            maxlength="5"
+            placeholder="e.g. 52918" 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold tracking-widest uppercase bg-emerald-50/40 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+          >
+          <p class="text-[10px] text-slate-500 mt-1">Scan or type 5-digit code</p>
+        </div>
         <div>
           <label class="block text-xs font-semibold text-slate-700 mb-1">Lot Needles</label>
           <input 
@@ -104,10 +119,12 @@
             name="needles" 
             id="form_needles_input" 
             required 
+            readonly
             value="24N" 
             placeholder="e.g. 24N" 
-            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase bg-slate-50"
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase bg-slate-50 text-slate-700"
           >
+          <p class="text-[10px] text-slate-500 mt-1">From chosen Lot</p>
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-700 mb-1">Machine Barcode Spec</label>
@@ -116,10 +133,23 @@
             name="barcode_needles" 
             id="form_barcode_needles" 
             required 
+            readonly
             value="24N" 
-            placeholder="e.g. 24N" 
-            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase bg-slate-50"
+            placeholder="Auto from Barcode" 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase bg-slate-50 text-slate-700"
           >
+          <p class="text-[10px] text-slate-500 mt-1" id="form_match_hint">Auto-matched with barcode</p>
+        </div>
+      </div>
+
+      <!-- Live Machine Barcode Verification Status Badge -->
+      <div id="form_machine_spec_badge" class="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs hidden">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-3">
+            <span class="px-2 py-0.5 rounded bg-slate-900 text-white font-mono text-[11px] font-bold" id="badge_machine_no">M-??</span>
+            <span class="text-slate-600 font-mono text-[11px]" id="badge_specs">Needles: -- | Shade: -- | WO: --</span>
+          </div>
+          <span id="badge_match_status" class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-200 text-slate-700">Checking...</span>
         </div>
       </div>
 
@@ -133,19 +163,23 @@
             type="number" 
             step="0.01" 
             name="weight" 
+            id="form_weight_input"
             required 
             placeholder="22.50" 
             class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
           >
+          <p class="text-[10px] text-slate-500 mt-1">Net roll weight</p>
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-700 mb-1">Tube No</label>
           <input 
             type="text" 
             name="tube" 
+            id="form_tube_input"
             value="T-101" 
             class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-none"
           >
+          <p class="text-[10px] text-slate-500 mt-1">Paper tube number</p>
         </div>
       </div>
 
@@ -155,6 +189,7 @@
         </a>
         <button 
           type="submit" 
+          id="form_submit_btn"
           class="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-colors shadow-sm flex items-center gap-2 cursor-pointer"
         >
           <i class="fa-solid fa-check"></i>
@@ -164,19 +199,233 @@
     </form>
   </div>
 </div>
+
+<!-- Specification Mismatch Alert Popup Modal -->
+<div id="mismatch_modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 hidden">
+  <div class="bg-white rounded-2xl max-w-lg w-full border-2 border-rose-500 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div class="bg-rose-600 p-4 text-white flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div class="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center text-lg font-bold">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+        </div>
+        <div>
+          <h3 class="font-bold text-sm tracking-wide" id="mismatch_modal_title">🚨 Specification Mismatch!</h3>
+          <p class="text-[11px] text-rose-100">Roll feed nahi ho sakta jab tak Machine Barcode match na ho</p>
+        </div>
+      </div>
+      <button type="button" onclick="closeMismatchModal()" class="text-white/80 hover:text-white text-lg cursor-pointer">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+
+    <div class="p-5 space-y-4 text-xs">
+      <div class="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 font-medium flex items-start gap-2.5">
+        <i class="fa-solid fa-circle-xmark text-rose-600 text-base mt-0.5 shrink-0"></i>
+        <div id="mismatch_modal_msg" class="leading-relaxed">--</div>
+      </div>
+
+      <!-- Comparative Table -->
+      <div class="border border-slate-200 rounded-xl overflow-hidden">
+        <div class="bg-slate-50 px-3 py-2 font-bold text-slate-700 text-[11px] uppercase border-b flex justify-between items-center">
+          <span>Specification Comparison</span>
+          <span class="text-[10px] text-slate-400 font-normal">Machine Sign vs Selected Lot</span>
+        </div>
+        <table class="w-full text-left">
+          <thead class="bg-slate-100/70 text-[10px] text-slate-500 uppercase border-b">
+            <tr>
+              <th class="p-2">Parameter</th>
+              <th class="p-2">Machine Barcode</th>
+              <th class="p-2">Selected Lot / Bag</th>
+              <th class="p-2 text-center">Result</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 font-mono text-xs" id="mismatch_comparison_tbody">
+            <!-- Dynamic comparison rows -->
+          </tbody>
+        </table>
+      </div>
+
+      <div class="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-[11px] flex items-center gap-2">
+        <i class="fa-solid fa-lightbulb text-amber-600 shrink-0"></i>
+        <span><strong>Hal:</strong> Sahi 5-digit Machine Barcode scan karein ya Machine Sign-In (/machine-sign) se matching spec set karein.</span>
+      </div>
+
+      <div class="flex justify-end pt-1">
+        <button type="button" onclick="closeMismatchModal()" class="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm cursor-pointer">
+          Theek Karein / Close
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+  let activeMachineData = null;
+  let currentBagShade = '';
+
   const woInput = document.getElementById('form_wo_input');
   const planSelect = document.getElementById('form_plan_select');
   const bagSelect = document.getElementById('form_bag_select');
   const lotSelect = document.getElementById('form_lot_select');
+  const machineBarcodeInput = document.getElementById('form_machine_barcode');
   const needlesInput = document.getElementById('form_needles_input');
   const barcodeNeedlesInput = document.getElementById('form_barcode_needles');
+  const formMatchHint = document.getElementById('form_match_hint');
+  const machineSpecBadge = document.getElementById('form_machine_spec_badge');
+  const badgeMachineNo = document.getElementById('badge_machine_no');
+  const badgeSpecs = document.getElementById('badge_specs');
+  const badgeMatchStatus = document.getElementById('badge_match_status');
   const planStatus = document.getElementById('form_plan_status');
   const bagStatus = document.getElementById('form_bag_status');
   const lotStatus = document.getElementById('form_lot_status');
+
+  // Modal helpers
+  function showMismatchModal(title, message, rows) {
+    document.getElementById('mismatch_modal_title').innerText = title || '🚨 Specification Mismatch!';
+    document.getElementById('mismatch_modal_msg').innerText = message || 'Selected specifications do not match Machine Barcode.';
+    const tbody = document.getElementById('mismatch_comparison_tbody');
+    tbody.innerHTML = '';
+    (rows || []).forEach(r => {
+      const isOk = r.match;
+      tbody.innerHTML += `
+        <tr class="${isOk ? 'bg-emerald-50/40 text-slate-800' : 'bg-rose-50/80 text-rose-900 font-bold'}">
+          <td class="p-2 border-b">${r.param}</td>
+          <td class="p-2 border-b font-mono">${r.machineVal || '--'}</td>
+          <td class="p-2 border-b font-mono">${r.lotVal || '--'}</td>
+          <td class="p-2 border-b text-center">
+            ${isOk ? '<span class="text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded text-[11px]">✅ Match</span>' : '<span class="text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded text-[11px]">❌ MISMATCH</span>'}
+          </td>
+        </tr>
+      `;
+    });
+    document.getElementById('mismatch_modal').classList.remove('hidden');
+  }
+
+  function closeMismatchModal() {
+    document.getElementById('mismatch_modal').classList.add('hidden');
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeMismatchModal();
+  });
+
+  // Machine Barcode Input & Instant Validation
+  machineBarcodeInput.addEventListener('input', function() {
+    const code = this.value.trim();
+    if (code.length === 5) {
+      verifyAndApplyBarcode(code, true);
+    } else {
+      machineSpecBadge.classList.add('hidden');
+      activeMachineData = null;
+    }
+  });
+
+  machineBarcodeInput.addEventListener('change', function() {
+    const code = this.value.trim();
+    if (code.length >= 4) {
+      verifyAndApplyBarcode(code, true);
+    }
+  });
+
+  async function verifyAndApplyBarcode(code, showModalOnError = false) {
+    try {
+      const res = await fetch('/api/machine-barcode/' + encodeURIComponent(code));
+      const data = await res.json();
+      if (!data.found) {
+        activeMachineData = null;
+        machineSpecBadge.classList.remove('hidden');
+        machineSpecBadge.className = 'p-3 bg-rose-50 rounded-xl border border-rose-300 text-xs';
+        badgeMachineNo.innerText = 'NOT FOUND';
+        badgeMachineNo.className = 'px-2 py-0.5 rounded bg-rose-700 text-white font-mono text-[11px] font-bold';
+        badgeSpecs.innerText = `5-Digit Barcode '${code}' is not registered!`;
+        badgeMatchStatus.innerText = 'INVALID BARCODE';
+        badgeMatchStatus.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-200 text-rose-800';
+
+        if (showModalOnError) {
+          showMismatchModal(
+            '⚠️ Invalid Machine Barcode',
+            `5-Digit Barcode '${code}' Machine Sign-In (/machine-sign) mein nahi mila! Pehle machine sign-in karein.`,
+            [{ param: '5-Digit Barcode', machineVal: code, lotVal: 'Unregistered', match: false }]
+          );
+        }
+        return false;
+      }
+
+      activeMachineData = data;
+      machineSpecBadge.classList.remove('hidden');
+      badgeMachineNo.innerText = data.machine_no || 'M-??';
+      badgeMachineNo.className = 'px-2 py-0.5 rounded bg-slate-900 text-white font-mono text-[11px] font-bold';
+      badgeSpecs.innerText = `Needles: ${data.needles || '--'} | Shade: ${data.shade || 'Any'} | WO: ${data.work_order || '--'}`;
+
+      if (data.needles) {
+        barcodeNeedlesInput.value = data.needles;
+        if (!needlesInput.value) needlesInput.value = data.needles;
+      }
+
+      // Auto-fill Work Order if empty
+      if (!woInput.value && data.work_order) {
+        woInput.value = data.work_order;
+        loadPlans(data.work_order);
+      }
+
+      return checkMatches(showModalOnError);
+    } catch (e) {
+      console.warn('Error verifying barcode:', e);
+      return false;
+    }
+  }
+
+  function checkMatches(triggerModal = false) {
+    if (!activeMachineData) return false;
+
+    const mNeedles = (activeMachineData.needles || '').trim().toUpperCase();
+    const lNeedles = (needlesInput.value || '').trim().toUpperCase();
+
+    const mShade = (activeMachineData.shade || '').trim().toLowerCase();
+    const lShade = (currentBagShade || '').trim().toLowerCase();
+
+    const mWo = (activeMachineData.work_order || '').trim().toUpperCase();
+    const lWo = (woInput.value || '').trim().toUpperCase();
+
+    const needlesMatch = !mNeedles || !lNeedles || mNeedles === lNeedles;
+    const woMatch = !mWo || !lWo || mWo === lWo;
+    const shadeMatch = !mShade || !lShade || mShade === lShade;
+
+    const allMatch = needlesMatch && woMatch && shadeMatch;
+
+    const rows = [
+      { param: 'Needles Spec', machineVal: mNeedles || '--', lotVal: lNeedles || '--', match: needlesMatch },
+      { param: 'Work Order', machineVal: mWo || '--', lotVal: lWo || '--', match: woMatch },
+      { param: 'Fabric Shade', machineVal: activeMachineData.shade || '--', lotVal: currentBagShade || '--', match: shadeMatch }
+    ];
+
+    if (allMatch) {
+      machineSpecBadge.className = 'p-3 bg-emerald-50 rounded-xl border border-emerald-300 text-xs';
+      badgeMatchStatus.innerText = '✅ 100% SPEC MATCH';
+      badgeMatchStatus.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800';
+      formMatchHint.innerText = `✅ Matched (${mNeedles})`;
+      formMatchHint.className = 'text-[10px] text-emerald-700 font-semibold mt-1';
+      return true;
+    } else {
+      machineSpecBadge.className = 'p-3 bg-rose-50 rounded-xl border border-rose-300 text-xs';
+      badgeMatchStatus.innerText = '❌ SPEC MISMATCH';
+      badgeMatchStatus.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-200 text-rose-800';
+      formMatchHint.innerText = `❌ Mismatch (Machine: ${mNeedles} vs Lot: ${lNeedles})`;
+      formMatchHint.className = 'text-[10px] text-rose-700 font-semibold mt-1';
+
+      if (triggerModal) {
+        let msg = 'Specifications mismatch: ';
+        if (!needlesMatch) msg += `Needles Lot (${lNeedles}) aur Machine Barcode (${mNeedles}) match nahi kar rahi! `;
+        if (!shadeMatch) msg += `Shade Bag (${currentBagShade}) aur Machine Barcode (${activeMachineData.shade}) match nahi kar rahe! `;
+        if (!woMatch) msg += `Work Order selected (${lWo}) aur Machine Barcode (${mWo}) match nahi kar rahe! `;
+
+        showMismatchModal('🚨 Machine Barcode Specification Mismatch!', msg, rows);
+      }
+      return false;
+    }
+  }
 
   woInput.addEventListener('input', function() {
     if (this.value.trim()) loadPlans(this.value.trim());
@@ -237,12 +486,14 @@
       if (Array.isArray(bags) && bags.length > 0) {
         bags.forEach(b => {
           const bagNo = typeof b === 'object' ? b.bag_number : b;
+          const shade = typeof b === 'object' ? (b.shade || '') : '';
           const label = typeof b === 'object' ? (b.label || `${b.bag_number} (${b.shade || 'No Shade'})`) : b;
-          bagSelect.innerHTML += `<option value="${bagNo}">${label}</option>`;
+          bagSelect.innerHTML += `<option value="${bagNo}" data-shade="${shade}">${label}</option>`;
         });
         bagSelect.disabled = false;
         bagStatus.innerText = `${bags.length} bag(s) found`;
         bagSelect.selectedIndex = 1;
+        onBagChanged();
         loadLots(bagSelect.value);
       } else {
         bagSelect.innerHTML = '<option value="">No bags found</option>';
@@ -255,8 +506,15 @@
   }
 
   bagSelect.addEventListener('change', function() {
+    onBagChanged();
     if (this.value) loadLots(this.value);
   });
+
+  function onBagChanged() {
+    const selOpt = bagSelect.options[bagSelect.selectedIndex];
+    currentBagShade = selOpt ? (selOpt.getAttribute('data-shade') || '') : '';
+    if (activeMachineData) checkMatches(false);
+  }
 
   async function loadLots(bagNo) {
     lotSelect.innerHTML = '<option value="">Loading lots...</option>';
@@ -270,7 +528,7 @@
 
       if (Array.isArray(lots) && lots.length > 0) {
         lots.forEach(lot => {
-          lotSelect.innerHTML += `<option value="${lot.lot_name}" data-needles="${lot.needles || '24N'}">${lot.lot_name} (${lot.needles || '24N'} - Bal: ${lot.rem_weight} KG)</option>`;
+          lotSelect.innerHTML += `<option value="${lot.lot_name}" data-needles="${lot.needles || '24N'}" data-barcode="${lot.barcode || ''}">${lot.lot_name} (${lot.needles || '24N'} - Bal: ${lot.rem_weight} KG)</option>`;
         });
         lotSelect.disabled = false;
         lotStatus.innerText = `${lots.length} lot(s) found`;
@@ -293,9 +551,36 @@
     if (selected) {
       const needles = selected.getAttribute('data-needles') || '24N';
       needlesInput.value = needles;
-      barcodeNeedlesInput.value = needles;
+
+      const bc = selected.getAttribute('data-barcode');
+      if (bc && !machineBarcodeInput.value) {
+        machineBarcodeInput.value = bc;
+        verifyAndApplyBarcode(bc, false);
+      } else if (activeMachineData) {
+        checkMatches(false);
+      }
     }
   }
+
+  // Intercept form submit and enforce strict matching & modal popups
+  document.getElementById('rollFormDirect').addEventListener('submit', function(e) {
+    const barcode = machineBarcodeInput.value.trim();
+    if (!barcode || barcode.length !== 5) {
+      e.preventDefault();
+      showMismatchModal(
+        '⚠️ Missing Machine Barcode',
+        'Roll record save karne ke liye 5-Digit Machine Barcode scan ya type karna lazmi hai!',
+        [{ param: '5-Digit Barcode', machineVal: barcode || 'Missing', lotVal: '5 Digits Required', match: false }]
+      );
+      return false;
+    }
+
+    const matchesOk = checkMatches(true);
+    if (!matchesOk) {
+      e.preventDefault();
+      return false;
+    }
+  });
 
   window.addEventListener('DOMContentLoaded', () => {
     const firstOption = document.querySelector('#form_wo_datalist option');
@@ -306,3 +591,4 @@
   });
 </script>
 {% endblock %}
+

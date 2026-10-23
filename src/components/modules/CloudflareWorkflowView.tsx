@@ -276,8 +276,8 @@ jobs:
         run: |
           echo "Starting GarmentFlow Backend Server with GitHub Actions MySQL on 127.0.0.1:\${PORT}..."
           
-          # Start gunicorn in background
-          gunicorn --workers 3 --bind 127.0.0.1:5000 main:app --daemon --access-logfile - --error-logfile -
+          # Start gunicorn with threaded workers to avoid server overload / timeouts
+          gunicorn --workers 2 --threads 4 --worker-class gthread --timeout 120 --bind 127.0.0.1:5000 main:app --daemon --access-logfile - --error-logfile -
           
           # Health check: Wait until server responds
           echo "Waiting for web server to initialize..."

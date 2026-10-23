@@ -115,8 +115,10 @@ def db():
                     database=MYSQL_DB,
                     charset='utf8mb4',
                     cursorclass=pymysql.cursors.DictCursor,
-                    autocommit=False,
+                    autocommit=True,
                     connect_timeout=10,
+                    read_timeout=15,
+                    write_timeout=15,
                     **ssl_dict
                 )
                 return MySQLConnectionWrapper(conn)
@@ -129,7 +131,8 @@ def db():
                     password=MYSQL_PASSWORD,
                     database=MYSQL_DB,
                     charset='utf8mb4',
-                    connection_timeout=10
+                    connection_timeout=10,
+                    autocommit=True
                 )
                 return MySQLConnectionWrapper(conn)
         except Exception as e:
@@ -254,7 +257,9 @@ def repair_and_migrate_db():
             machine_no {text_type},
             unit_no INTEGER,
             unique_code {text_type} UNIQUE,
-            created_at {text_type}
+            created_at {text_type},
+            work_order {text_type},
+            shade {text_type}
         )""",
         f"""CREATE TABLE IF NOT EXISTS quality_checks (
             id {int_pk} {auto_inc},
@@ -390,6 +395,10 @@ def repair_and_migrate_db():
             ('gate_pass_no', f'{text_type}'),
             ('total_rolls', 'INTEGER DEFAULT 0'),
             ('total_weight', 'REAL DEFAULT 0')
+        ],
+        'machine_assignments': [
+            ('work_order', f'{text_type}'),
+            ('shade', f'{text_type}')
         ]
     }
 
@@ -404,6 +413,20 @@ def repair_and_migrate_db():
                 except Exception as e:
                     # Ignore duplicate column errors
                     pass
+
+    # Auto-backfill machine_assignments work_order from job_full_text if missing
+    try:
+        cur.execute("SELECT id, job_full_text FROM machine_assignments WHERE work_order IS NULL OR work_order = ''")
+        unfilled = cur.fetchall()
+        for u in unfilled:
+            u_dict = dict(u) if isinstance(u, dict) else {'id': u[0], 'job_full_text': u[1]}
+            jtext = u_dict.get('job_full_text') or ''
+            if '/' in jtext:
+                wo_part = jtext.split('/', 1)[1].strip()
+                cur.execute("UPDATE machine_assignments SET work_order = ? WHERE id = ?", (wo_part, u_dict['id']))
+        con.commit()
+    except Exception as e:
+        pass
 
     # 3. Seed ONLY default Admin user from environment / GitHub secrets if not exists
     try:
@@ -1057,9 +1080,9 @@ def machine_sign():
 
         cur.execute("""
             INSERT INTO machine_assignments 
-            (job_full_text, needles, machine_no, unit_no, unique_code, created_at) 
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (job_text, needles, machine, unit, code, datetime.now().strftime("%Y-%m-%d %H:%M")))
+            (job_full_text, needles, machine_no, unit_no, unique_code, created_at, work_order, shade) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (job_text, needles, machine, unit, code, datetime.now().strftime("%Y-%m-%d %H:%M"), work_order, shade))
         con.commit()
         flash(f"Machine M#{machine} assigned to {job_text}. 5-Digit Barcode: {code}", "success")
         con.close()
@@ -1082,12 +1105,89 @@ def delete_machine_sign(id):
     return redirect(url_for("machine_sign"))
 
 # ================= ROLL ENTRY & BARCODE SYSTEM =================
+def get_ready_work_orders(cur):
+    """
+    Returns ONLY Work Orders whose entire series is complete:
+    Work Order -> Plan -> Bag (Badge) -> Lot AND Machine Sign (5-Digit Barcode).
+    """
+    try:
+        cur.execute("""
+            SELECT DISTINCT wo.work_order
+            FROM work_orders wo
+            JOIN plans p ON p.work_order_id = wo.id
+            JOIN bags b ON b.plan_id = p.id
+            JOIN lots l ON l.bag_id = b.id
+            JOIN machine_assignments m ON (
+                (m.work_order IS NOT NULL AND LOWER(TRIM(m.work_order)) = LOWER(TRIM(wo.work_order)))
+                OR (m.job_full_text LIKE CONCAT('%', wo.work_order, '%'))
+            )
+            WHERE m.unique_code IS NOT NULL 
+              AND LENGTH(TRIM(m.unique_code)) = 5
+            ORDER BY wo.work_order DESC
+        """)
+        rows = cur.fetchall()
+        return [r['work_order'] if isinstance(r, dict) else r[0] for r in rows]
+    except Exception as e:
+        print(f"[WARN] Error fetching ready work orders: {e}")
+        return []
+
+@app.route("/api/machine-barcode/<code>")
+@app.route("/api/machine-barcode")
+def api_machine_barcode(code=None):
+    if not code:
+        code = request.args.get("code") or request.args.get("barcode") or ""
+    code = str(code).strip()
+    if not code:
+        return jsonify({"found": False, "message": "5-Digit Machine Barcode is required."}), 400
+
+    con = db(); cur = con.cursor()
+    try:
+        cur.execute("""
+            SELECT m.*, j.shade_ref
+            FROM machine_assignments m
+            LEFT JOIN jobs j ON m.job_full_text LIKE CONCAT('%', j.job, '%')
+            WHERE TRIM(m.unique_code) = ?
+            ORDER BY m.id DESC LIMIT 1
+        """, (code,))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({
+                "found": False,
+                "message": f"5-Digit Barcode '{code}' registered nahi hai! Pehle Machine Sign-In (/machine-sign) karein."
+            }), 404
+
+        item = dict(row) if isinstance(row, dict) else {
+            'id': row[0], 'job_full_text': row[1], 'needles': row[2], 'machine_no': row[3],
+            'unit_no': row[4], 'unique_code': row[5], 'created_at': row[6],
+            'work_order': row[7] if len(row) > 7 else '', 'shade': row[8] if len(row) > 8 else ''
+        }
+
+        wo = item.get('work_order')
+        if not wo and item.get('job_full_text') and '/' in item['job_full_text']:
+            wo = item['job_full_text'].split('/', 1)[1].strip()
+
+        shade = item.get('shade') or item.get('shade_ref') or ''
+
+        return jsonify({
+            "found": True,
+            "unique_code": item.get('unique_code'),
+            "machine_no": item.get('machine_no'),
+            "unit_no": item.get('unit_no'),
+            "needles": item.get('needles'),
+            "work_order": wo or '',
+            "shade": shade,
+            "job_full_text": item.get('job_full_text')
+        })
+    except Exception as e:
+        return jsonify({"found": False, "message": str(e)}), 500
+    finally:
+        con.close()
+
 @app.route("/roll-entry")
 @role_required(['clerk', 'incharge', 'manager'])
 def roll_entry():
     con = db(); cur = con.cursor()
-    cur.execute("SELECT work_order FROM work_orders")
-    work_orders = [w["work_order"] for w in cur.fetchall()]
+    work_orders = get_ready_work_orders(cur)
     con.close()
     return render_template("roll_entry_select.html", work_orders=work_orders)
 
@@ -1337,9 +1437,101 @@ def api_barcode_details(barcode):
         return jsonify(dict(row))
     return jsonify({"error": "Barcode not found"}), 404
 
+@app.route("/api/validate-roll-match", methods=["GET", "POST"])
+def api_validate_roll_match():
+    """Validates whether machine assignment barcode matches the chosen lot, shade, and work order"""
+    if request.method == "POST":
+        d = request.json or {}
+    else:
+        d = request.args
+
+    barcode = str(d.get("barcode") or d.get("code") or "").strip()
+    wo_val = str(d.get("work_order") or "").strip()
+    shade_val = str(d.get("shade") or "").strip()
+    needles_val = str(d.get("needles") or "").strip()
+
+    if not barcode:
+        return jsonify({"valid": False, "mismatch_type": "empty_barcode", "message": "5-Digit Machine Barcode is required."}), 400
+
+    con = db(); cur = con.cursor()
+    try:
+        cur.execute("""
+            SELECT m.*, j.shade_ref
+            FROM machine_assignments m
+            LEFT JOIN jobs j ON m.job_full_text LIKE CONCAT('%', j.job, '%')
+            WHERE TRIM(m.unique_code) = ?
+            ORDER BY m.id DESC LIMIT 1
+        """, (barcode,))
+        m_row = cur.fetchone()
+        if not m_row:
+            return jsonify({
+                "valid": False,
+                "mismatch_type": "barcode_not_found",
+                "message": f"5-Digit Barcode '{barcode}' system mein registered nahi hai! Pehle Machine Sign-In (/machine-sign) karein."
+            }), 404
+
+        m_dict = dict(m_row) if isinstance(m_row, dict) else {
+            'machine_no': m_row[3], 'needles': m_row[2], 'work_order': m_row[7] if len(m_row) > 7 else '',
+            'shade': m_row[8] if len(m_row) > 8 else '', 'job_full_text': m_row[1]
+        }
+
+        m_needles = (m_dict.get('needles') or '').strip().upper()
+        m_shade = (m_dict.get('shade') or m_dict.get('shade_ref') or '').strip().lower()
+        m_wo = (m_dict.get('work_order') or '').strip().upper()
+        if not m_wo and '/' in m_dict.get('job_full_text', ''):
+            m_wo = m_dict['job_full_text'].split('/', 1)[1].strip().upper()
+
+        machine_spec = {
+            "unique_code": barcode,
+            "machine_no": m_dict.get('machine_no', 'M-01'),
+            "needles": m_needles,
+            "shade": m_dict.get('shade') or m_dict.get('shade_ref') or '',
+            "work_order": m_wo
+        }
+
+        # 1. Needles validation
+        if needles_val and m_needles and needles_val.strip().upper() != m_needles:
+            return jsonify({
+                "valid": False,
+                "mismatch_type": "needles",
+                "message": f"Needles Mismatch! Machine Sign Barcode ki Needles ({m_needles}) chuni hui Lot ki Needles ({needles_val}) se match nahi kar rahi!",
+                "machine_spec": machine_spec,
+                "lot_spec": {"needles": needles_val, "shade": shade_val, "work_order": wo_val}
+            }), 400
+
+        # 2. Work Order validation
+        if wo_val and m_wo and wo_val.strip().upper() != m_wo:
+            return jsonify({
+                "valid": False,
+                "mismatch_type": "work_order",
+                "message": f"Work Order Mismatch! Ye 5-digit barcode Work Order '{m_wo}' ke liye signed hai, jabke chuna gaya Work Order '{wo_val}' hai!",
+                "machine_spec": machine_spec,
+                "lot_spec": {"needles": needles_val, "shade": shade_val, "work_order": wo_val}
+            }), 400
+
+        # 3. Shade validation
+        if shade_val and m_shade and shade_val.strip().lower() != m_shade:
+            return jsonify({
+                "valid": False,
+                "mismatch_type": "shade",
+                "message": f"Shade Mismatch! Machine Sign Barcode ka Shade '{m_dict.get('shade') or m_dict.get('shade_ref')}' Bag ke Shade '{shade_val}' se match nahi kar raha!",
+                "machine_spec": machine_spec,
+                "lot_spec": {"needles": needles_val, "shade": shade_val, "work_order": wo_val}
+            }), 400
+
+        return jsonify({
+            "valid": True,
+            "message": "All specifications match!",
+            "machine_spec": machine_spec
+        })
+    except Exception as e:
+        return jsonify({"valid": False, "message": str(e)}), 500
+    finally:
+        con.close()
+
 @app.route("/api/save-roll", methods=["POST"])
 def api_save_roll():
-    data = request.json
+    data = request.json or {}
     con = db(); cur = con.cursor()
     try:
         cur.execute("""
@@ -1348,32 +1540,80 @@ def api_save_roll():
             JOIN plans p ON b.plan_id = p.id
             JOIN work_orders wo ON p.work_order_id = wo.id
             WHERE b.bag_number = ?
-        """, (data['bag_number'],))
+        """, (data.get('bag_number'),))
         meta = cur.fetchone()
         if not meta:
             return jsonify({"success": False, "message": "Bag/Work Order not found!"}), 404
 
-        shade = meta['shade']
+        shade = (meta['shade'] or '')
         wo_val = meta['work_order']
 
+        barcode_scanned = str(data.get('barcode', '')).strip()
+        if not barcode_scanned:
+            return jsonify({"success": False, "message": "5-Digit Machine Barcode is required!"}), 400
+
         cur.execute("""
-            SELECT job FROM jobs 
-            WHERE work_order_ref = ? AND shade_ref = ? AND needles_ref LIKE ?
-        """, (wo_val, shade, f"{data['needles']}%"))
-        job_row = cur.fetchone()
-        if not job_row:
-            return jsonify({"success": False, "message": "No Job record found for this Shade/Needles combo!"}), 400
-
-        current_job_id = job_row['job']
-        current_job_full = f"{current_job_id}/{wo_val}"
-
-        barcode_scanned = data.get('barcode')
-        cur.execute("SELECT machine_no, job_full_text FROM machine_assignments WHERE unique_code = ?", (barcode_scanned,))
+            SELECT m.*, j.shade_ref
+            FROM machine_assignments m
+            LEFT JOIN jobs j ON m.job_full_text LIKE CONCAT('%', j.job, '%')
+            WHERE TRIM(m.unique_code) = ?
+            ORDER BY m.id DESC LIMIT 1
+        """, (barcode_scanned,))
         m_row = cur.fetchone()
         if not m_row:
-            return jsonify({"success": False, "message": "Invalid Machine Barcode!"}), 400
+            return jsonify({
+                "success": False,
+                "mismatch_type": "barcode_not_found",
+                "message": f"5-Digit Machine Barcode '{barcode_scanned}' system mein registered nahi hai! Pehle Machine Sign-In (/machine-sign) karein."
+            }), 400
 
-        machine_no = m_row['machine_no']
+        m_dict = dict(m_row) if isinstance(m_row, dict) else {
+            'machine_no': m_row[3], 'needles': m_row[2], 'work_order': m_row[7] if len(m_row) > 7 else '',
+            'shade': m_row[8] if len(m_row) > 8 else '', 'job_full_text': m_row[1]
+        }
+
+        # 1. Needles match validation
+        m_needles = (m_dict.get('needles') or '').strip().upper()
+        lot_needles = str(data.get('needles', '')).strip().upper()
+        if m_needles and lot_needles and m_needles != lot_needles:
+            return jsonify({
+                "success": False,
+                "mismatch_type": "needles",
+                "message": f"Needles Mismatch! Machine Sign Barcode ki Needles ({m_needles}) chuni hui Lot ki Needles ({lot_needles}) se match nahi kar rahi!"
+            }), 400
+
+        # 2. Work Order match validation
+        m_wo = (m_dict.get('work_order') or '').strip().upper()
+        if not m_wo and '/' in m_dict.get('job_full_text', ''):
+            m_wo = m_dict['job_full_text'].split('/', 1)[1].strip().upper()
+        if m_wo and wo_val and m_wo != wo_val.strip().upper():
+            return jsonify({
+                "success": False,
+                "mismatch_type": "work_order",
+                "message": f"Work Order Mismatch! Ye 5-digit barcode Work Order '{m_wo}' ke liye signed hai, jabke selected Work Order '{wo_val}' hai!"
+            }), 400
+
+        # 3. Shade match validation
+        m_shade = (m_dict.get('shade') or m_dict.get('shade_ref') or '').strip().lower()
+        b_shade = shade.strip().lower()
+        if m_shade and b_shade and m_shade != b_shade:
+            return jsonify({
+                "success": False,
+                "mismatch_type": "shade",
+                "message": f"Shade Mismatch! Machine Sign Barcode ka Shade '{m_dict.get('shade') or m_dict.get('shade_ref')}' Bag ke Shade '{shade}' se match nahi kar raha!"
+            }), 400
+
+        machine_no = m_dict.get('machine_no', 'M-01')
+
+        # Auto-create or fetch job record
+        cur.execute("""
+            SELECT job FROM jobs 
+            WHERE LOWER(TRIM(work_order_ref)) = LOWER(TRIM(?)) 
+              AND LOWER(TRIM(shade_ref)) = LOWER(TRIM(?))
+        """, (wo_val, shade))
+        job_row = cur.fetchone()
+        current_job_id = job_row['job'] if job_row else 1
+        current_job_full = f"{current_job_id}/{wo_val}"
 
         # Generate unique 7-digit roll barcode
         while True:
@@ -1795,51 +2035,81 @@ def plan_status():
 def admin_dashboard():
     if session.get('role') != 'admin':
         flash("Access Denied: Admins only", "danger")
-        return redirect(url_for('index'))
+        return redirect(url_for('login'))
 
     con = db(); cur = con.cursor()
-    if request.method == "POST":
-        action = request.form.get("action")
-        if action == "add_user":
-            cur.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
-                        (request.form.get("username"), request.form.get("password"), request.form.get("role")))
-        elif action == "delete_user":
-            cur.execute("DELETE FROM users WHERE id = ?", (request.form.get("user_id"),))
-        con.commit()
+    try:
+        if request.method == "POST":
+            action = request.form.get("action")
+            try:
+                if action == "add_user":
+                    uname = request.form.get("username", "").strip()
+                    pword = request.form.get("password", "").strip()
+                    role_val = request.form.get("role", "clerk").strip()
+                    if not uname or not pword:
+                        flash("Username and password are required!", "warning")
+                    else:
+                        cur.execute("SELECT id FROM users WHERE username = ?", (uname,))
+                        if cur.fetchone():
+                            flash(f"User '{uname}' already exists! Please choose another username.", "warning")
+                        else:
+                            cur.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                                        (uname, pword, role_val))
+                            con.commit()
+                            flash(f"User '{uname}' ({role_val}) created successfully!", "success")
+                elif action == "delete_user":
+                    u_id = request.form.get("user_id")
+                    if u_id:
+                        cur.execute("DELETE FROM users WHERE id = ?", (u_id,))
+                        con.commit()
+                        flash("User deleted successfully.", "info")
+            except Exception as fe:
+                con.rollback()
+                flash(f"Action error: {str(fe)}", "danger")
 
-    def get_val(row, key_name, default=0):
-        if not row:
-            return default
-        if isinstance(row, dict):
-            return row.get(key_name, default)
-        try:
-            return row[0] if row[0] is not None else default
-        except (IndexError, KeyError):
-            return default
+        def get_val(row, key_name, default=0):
+            if not row:
+                return default
+            if isinstance(row, dict):
+                return row.get(key_name, default)
+            try:
+                return row[0] if row[0] is not None else default
+            except (IndexError, KeyError):
+                return default
 
-    cur.execute("SELECT SUM(weight) as total_prod FROM fabric_rolls")
-    prod = get_val(cur.fetchone(), 'total_prod', 0)
-    cur.execute("SELECT COUNT(*) as cnt FROM dispatch_records")
-    dispatched = get_val(cur.fetchone(), 'cnt', 0)
-    cur.execute("SELECT COUNT(DISTINCT bag_id) as cnt FROM lots")
-    plans = get_val(cur.fetchone(), 'cnt', 0)
-    cur.execute("SELECT SUM(grade_a_weight) as ga, SUM(grade_b_weight) as gb FROM quality_checks")
-    q = cur.fetchone()
-    if q and isinstance(q, dict):
-        ga = q.get('ga') or 0
-        gb = q.get('gb') or 0
-    elif q:
-        ga = q[0] or 0
-        gb = q[1] or 0
-    else:
-        ga = 0; gb = 0
+        cur.execute("SELECT COALESCE(SUM(weight), 0) as total_prod FROM fabric_rolls")
+        prod = get_val(cur.fetchone(), 'total_prod', 0)
+        cur.execute("SELECT COUNT(*) as cnt FROM dispatch_records")
+        dispatched = get_val(cur.fetchone(), 'cnt', 0)
+        cur.execute("SELECT COUNT(DISTINCT bag_id) as cnt FROM lots")
+        plans = get_val(cur.fetchone(), 'cnt', 0)
+        cur.execute("SELECT COALESCE(SUM(grade_a_weight), 0) as ga, COALESCE(SUM(grade_b_weight), 0) as gb FROM quality_checks")
+        q = cur.fetchone()
+        ga = q.get('ga', 0) if isinstance(q, dict) else (q[0] if q else 0)
+        gb = q.get('gb', 0) if isinstance(q, dict) else (q[1] if q else 0)
 
-    cur.execute("SELECT * FROM fabric_rolls ORDER BY id DESC LIMIT 10")
-    recent = cur.fetchall()
-    cur.execute("SELECT * FROM users")
-    users = cur.fetchall()
-    con.close()
-    return render_template("admin_pro.html", **locals())
+        cur.execute("SELECT * FROM fabric_rolls ORDER BY id DESC LIMIT 10")
+        recent = cur.fetchall()
+        cur.execute("SELECT id, username, role FROM users ORDER BY id DESC")
+        users = cur.fetchall()
+
+        return render_template("admin_pro.html",
+                               prod=float(prod or 0),
+                               dispatched=int(dispatched or 0),
+                               plans=int(plans or 0),
+                               ga=float(ga or 0),
+                               gb=float(gb or 0),
+                               recent=recent,
+                               users=users)
+    except Exception as e:
+        print(f"[ADMIN DASHBOARD ERROR] {e}")
+        con.rollback()
+        flash(f"Notice: {str(e)}", "danger")
+        return render_template("admin_pro.html",
+                               prod=0.0, dispatched=0, plans=0, ga=0.0, gb=0.0,
+                               recent=[], users=[])
+    finally:
+        con.close()
 
 # ================= EXCEL / CSV REPORT GENERATOR =================
 def generate_plan_excel(wo_name=None, bag_number=None):
@@ -1967,34 +2237,91 @@ def export_plan_excel():
 @app.route("/roll-entry/form", methods=["GET", "POST"])
 @role_required(['clerk', 'incharge', 'manager', 'admin'])
 def roll_entry_form():
-    if request.method == "POST":
-        d = request.form
-        wo = d.get("work_order", "").strip()
-        plan = d.get("plan_id", "").strip()
-        bag = d.get("bag", "").strip()
-        lot = d.get("lot", "").strip()
-        weight = float(d.get("weight", 0) or 0)
-        tube = d.get("tube", "").strip()
-        needles = d.get("needles", "").strip()
-        bc_needles = d.get("barcode_needles", "").strip() or needles
+    con = db(); cur = con.cursor()
+    try:
+        if request.method == "POST":
+            d = request.form
+            wo = d.get("work_order", "").strip()
+            plan = d.get("plan_id", "").strip()
+            bag = d.get("bag", "").strip()
+            lot = d.get("lot", "").strip()
+            weight = float(d.get("weight", 0) or 0)
+            tube = d.get("tube", "").strip()
+            needles = d.get("needles", "").strip()
+            bc_needles = d.get("barcode_needles", "").strip() or needles
+            barcode_scanned = (d.get("barcode") or d.get("machine_barcode") or "").strip()
 
-        con = db(); cur = con.cursor()
-        cur.execute("SELECT MAX(roll_no) FROM fabric_rolls WHERE bag_number = ?", (bag,))
-        row = cur.fetchone()
-        max_no = (row['MAX(roll_no)'] if isinstance(row, dict) else row[0]) if row else None
-        next_roll = 1 if max_no is None else (max_no + 1)
-        barcode = f"R-{bag}-{next_roll:02d}"
+            if not barcode_scanned:
+                flash("5-Digit Machine Barcode lazmi hai!", "danger")
+                work_orders = get_ready_work_orders(cur)
+                return render_template("roll_entry_form.html", work_orders=work_orders)
 
-        cur.execute("""
-            INSERT INTO fabric_rolls (work_order, plan_id, bag_number, lot_name, roll_no, weight, tube_no, needles, created_at, roll_barcode)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (wo, plan, bag, lot, next_roll, weight, tube, bc_needles, datetime.now().strftime("%Y-%m-%d %H:%M"), barcode))
-        con.commit(); con.close()
-        flash(f"Roll #{next_roll} ({barcode}) added successfully!", "success")
-    cur.execute("SELECT DISTINCT work_order FROM work_orders ORDER BY work_order DESC")
-    work_orders = [w["work_order"] for w in cur.fetchall()]
-    con.close()
-    return render_template("roll_entry_form.html", work_orders=work_orders)
+            # Verify Machine Assignment
+            cur.execute("""
+                SELECT m.*, j.shade_ref
+                FROM machine_assignments m
+                LEFT JOIN jobs j ON m.job_full_text LIKE CONCAT('%', j.job, '%')
+                WHERE TRIM(m.unique_code) = ?
+                ORDER BY m.id DESC LIMIT 1
+            """, (barcode_scanned,))
+            m_row = cur.fetchone()
+            if not m_row:
+                flash(f"5-Digit Machine Barcode '{barcode_scanned}' registered nahi hai! Pehle Machine Sign-In karein.", "danger")
+                work_orders = get_ready_work_orders(cur)
+                return render_template("roll_entry_form.html", work_orders=work_orders)
+
+            m_dict = dict(m_row) if isinstance(m_row, dict) else {
+                'machine_no': m_row[3], 'needles': m_row[2], 'work_order': m_row[7] if len(m_row) > 7 else '',
+                'shade': m_row[8] if len(m_row) > 8 else '', 'job_full_text': m_row[1]
+            }
+
+            # 1. Needles check
+            m_needles = (m_dict.get('needles') or '').strip().upper()
+            if m_needles and needles.upper() != m_needles:
+                flash(f"Needles Mismatch! Machine Sign Barcode ki Needles ({m_needles}) chuni hui Lot ki Needles ({needles}) se match nahi kar rahi!", "danger")
+                work_orders = get_ready_work_orders(cur)
+                return render_template("roll_entry_form.html", work_orders=work_orders)
+
+            # 2. Work Order check
+            m_wo = (m_dict.get('work_order') or '').strip().upper()
+            if not m_wo and '/' in m_dict.get('job_full_text', ''):
+                m_wo = m_dict['job_full_text'].split('/', 1)[1].strip().upper()
+            if m_wo and wo.upper() != m_wo:
+                flash(f"Work Order Mismatch! Ye 5-digit barcode Work Order '{m_wo}' ka hai, jabke selected Work Order '{wo}' hai!", "danger")
+                work_orders = get_ready_work_orders(cur)
+                return render_template("roll_entry_form.html", work_orders=work_orders)
+
+            # 3. Shade check
+            cur.execute("SELECT shade FROM bags WHERE bag_number = ?", (bag,))
+            b_row = cur.fetchone()
+            bag_shade = (b_row['shade'] if isinstance(b_row, dict) else (b_row[0] if b_row else '')) or ''
+            m_shade = (m_dict.get('shade') or m_dict.get('shade_ref') or '').strip().lower()
+            if m_shade and bag_shade and m_shade != bag_shade.strip().lower():
+                flash(f"Shade Mismatch! Machine Sign Barcode ka Shade '{m_dict.get('shade') or m_dict.get('shade_ref')}' Bag ke Shade '{bag_shade}' se match nahi kar raha!", "danger")
+                work_orders = get_ready_work_orders(cur)
+                return render_template("roll_entry_form.html", work_orders=work_orders)
+
+            machine_no = m_dict.get('machine_no', 'M-01')
+
+            cur.execute("SELECT MAX(roll_no) FROM fabric_rolls WHERE bag_number = ?", (bag,))
+            row = cur.fetchone()
+            max_no = (row['MAX(roll_no)'] if isinstance(row, dict) else row[0]) if row else None
+            next_roll = 1 if max_no is None else (max_no + 1)
+            barcode = f"R-{bag}-{next_roll:02d}"
+
+            cur.execute("""
+                INSERT INTO fabric_rolls (work_order, plan_id, bag_number, lot_name, roll_no, weight, tube_no, needles, created_at, barcode_used, roll_barcode, machine_no)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (wo, plan, bag, lot, next_roll, weight, tube, bc_needles, datetime.now().strftime("%Y-%m-%d %H:%M"), barcode_scanned, barcode, machine_no))
+
+            cur.execute("UPDATE lots SET fabric_weight = fabric_weight - ? WHERE lot_name = ? AND needles = ?", (weight, lot, needles))
+            con.commit()
+            flash(f"Roll #{next_roll} ({barcode}) added successfully! Machine: {machine_no}", "success")
+
+        work_orders = get_ready_work_orders(cur)
+        return render_template("roll_entry_form.html", work_orders=work_orders)
+    finally:
+        con.close()
 
 @app.route("/view-barcode", methods=["GET"])
 @role_required(['clerk', 'incharge', 'manager', 'admin'])

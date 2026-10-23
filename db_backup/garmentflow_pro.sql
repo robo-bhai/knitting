@@ -550,7 +550,7 @@ CREATE TABLE `users` (
   `role` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `username` (`username`)
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -559,7 +559,7 @@ CREATE TABLE `users` (
 
 LOCK TABLES `users` WRITE;
 /*!40000 ALTER TABLE `users` DISABLE KEYS */;
-INSERT INTO `users` VALUES (1,'admin','admin123','admin'),(2,'c1234','cp1234','clerk'),(3,'i1234','ip1234','incharge'),(4,'m1234','mp1234','manager'),(5,'noman@ikram','hadi1.5)','admin');
+INSERT INTO `users` VALUES (5,'noman@ikram','hadi1.5)','admin'),(6,'zahoor','za786','incharge');
 /*!40000 ALTER TABLE `users` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -626,4 +626,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-10-23 16:21:52
+-- Dump completed on 2026-10-23 16:22:54

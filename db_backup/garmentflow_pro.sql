@@ -302,7 +302,7 @@ CREATE TABLE `jobs` (
   `shade_ref` varchar(255) DEFAULT NULL,
   `needles_ref` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -311,7 +311,7 @@ CREATE TABLE `jobs` (
 
 LOCK TABLES `jobs` WRITE;
 /*!40000 ALTER TABLE `jobs` DISABLE KEYS */;
-INSERT INTO `jobs` VALUES (1,1,'22398','Navy Blue','2660');
+INSERT INTO `jobs` VALUES (1,1,'22398','Navy Blue','2660'),(2,2,'22398','Navy Blue','1512');
 /*!40000 ALTER TABLE `jobs` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -335,7 +335,7 @@ CREATE TABLE `lots` (
   `remarks` text,
   `created_at` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -344,7 +344,7 @@ CREATE TABLE `lots` (
 
 LOCK TABLES `lots` WRITE;
 /*!40000 ALTER TABLE `lots` DISABLE KEYS */;
-INSERT INTO `lots` VALUES (1,1,'Lot-A',72,500,500,500,'2660',1,'','2026-10-23');
+INSERT INTO `lots` VALUES (1,1,'Lot-A',72,500,500,500,'2660',1,'','2026-10-23'),(2,1,'LoT-X',36,250,250,250,'1512',2,'','2026-10-23');
 /*!40000 ALTER TABLE `lots` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -365,7 +365,7 @@ CREATE TABLE `machine_assignments` (
   `created_at` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `unique_code` (`unique_code`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -374,6 +374,7 @@ CREATE TABLE `machine_assignments` (
 
 LOCK TABLES `machine_assignments` WRITE;
 /*!40000 ALTER TABLE `machine_assignments` DISABLE KEYS */;
+INSERT INTO `machine_assignments` VALUES (1,'2/22398','1512','11',1,'17665','2026-10-23 15:59');
 /*!40000 ALTER TABLE `machine_assignments` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -623,4 +624,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-10-23 15:58:28
+-- Dump completed on 2026-10-23 15:59:30

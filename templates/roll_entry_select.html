@@ -643,9 +643,10 @@
       if (Array.isArray(bags) && bags.length > 0) {
         bags.forEach(b => {
           const bagNo = typeof b === 'object' ? b.bag_number : b;
+          const bagId = typeof b === 'object' ? (b.id || '') : '';
           const shade = typeof b === 'object' ? (b.shade || '') : '';
           const label = typeof b === 'object' ? (b.label || `${b.bag_number} (${b.shade || 'No Shade'})`) : b;
-          bagSelect.innerHTML += `<option value="${bagNo}" data-shade="${shade}">${label}</option>`;
+          bagSelect.innerHTML += `<option value="${bagNo}" data-bag-id="${bagId}" data-shade="${shade}">${label}</option>`;
         });
         bagSelect.disabled = false;
         bagCountBadge.innerText = `${bags.length} bag(s)`;
@@ -680,23 +681,27 @@
     currentLot = '';
     const selOpt = bagSelect.options[bagSelect.selectedIndex];
     currentShade = selOpt ? (selOpt.getAttribute('data-shade') || '') : '';
+    const bagId = selOpt ? (selOpt.getAttribute('data-bag-id') || '') : '';
 
     lotSelect.innerHTML = '<option value="">Loading lots...</option>';
     lotSelect.disabled = true;
     alreadyFeedStrip.classList.add('hidden');
 
-    if (!currentBag) return;
+    if (!currentBag && !bagId) return;
 
     cascadeStatus.innerText = 'Loading lots...';
     try {
-      let res = await fetch('/api/lots?bag_number=' + encodeURIComponent(currentBag));
+      let url = '/api/lots?bag_number=' + encodeURIComponent(currentBag);
+      if (bagId) url += '&bag_id=' + encodeURIComponent(bagId);
+      let res = await fetch(url);
       if (!res.ok) res = await fetch('/api/lots/' + encodeURIComponent(currentBag));
       const lots = await res.json();
       lotSelect.innerHTML = '<option value="">-- Choose Lot --</option>';
 
       if (Array.isArray(lots) && lots.length > 0) {
         lots.forEach(lot => {
-          lotSelect.innerHTML += `<option value="${lot.lot_name}" data-needles="${lot.needles || '24N'}" data-barcode="${lot.barcode || ''}">${lot.lot_name} (${lot.needles || '24N'} - Bal: ${lot.rem_weight} KG)</option>`;
+          const bal = (lot.rem_weight !== undefined && lot.rem_weight !== null) ? Number(lot.rem_weight).toFixed(1) : Number(lot.fabric_weight || 0).toFixed(1);
+          lotSelect.innerHTML += `<option value="${lot.lot_name}" data-needles="${lot.needles || '24N'}" data-barcode="${lot.barcode || ''}">${lot.lot_name} (${lot.needles || '24N'} - Bal: ${bal} KG)</option>`;
         });
         lotSelect.disabled = false;
         lotCountBadge.innerText = `${lots.length} lot(s)`;

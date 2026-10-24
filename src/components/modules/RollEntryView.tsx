@@ -171,6 +171,7 @@ export const RollEntryView: React.FC = () => {
       const matchedLots = lots.filter(l => {
         if (l.bag_id === currentBagObj.id) return true;
         if (String(l.bag_id) === bagIdStr) return true;
+        if (l.lot_name.trim().toLowerCase() === bagNoClean) return true;
         if ((l as any).bag_number && String((l as any).bag_number).trim().toLowerCase() === bagNoClean) return true;
         return false;
       });

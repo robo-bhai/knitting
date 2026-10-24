@@ -1318,7 +1318,7 @@ def api_bags(plan_id=None):
     if plan_id:
         try:
             cur.execute("""
-                SELECT b.bag_number, b.shade, b.id, p.plan_id 
+                SELECT b.id, b.bag_number, b.shade, p.plan_id 
                 FROM bags b
                 JOIN plans p ON b.plan_id = p.id
                 LEFT JOIN finalized_bags fb ON LOWER(TRIM(b.bag_number)) = LOWER(TRIM(fb.bag_number))
@@ -1330,11 +1330,12 @@ def api_bags(plan_id=None):
                 ORDER BY b.id ASC
             """, (plan_id, plan_id, plan_id, f"%{plan_id}%"))
             for b in cur.fetchall():
-                bag_no = b.get('bag_number') if isinstance(b, dict) else b[0]
-                shade = b.get('shade') if isinstance(b, dict) else b[1]
+                b_id = b.get('id') if isinstance(b, dict) else b[0]
+                bag_no = b.get('bag_number') if isinstance(b, dict) else b[1]
+                shade = b.get('shade') if isinstance(b, dict) else b[2]
                 shade_str = (shade or "").strip()
-                label = f"{bag_no} ({shade_str})" if shade_str else bag_no
-                data.append({"bag_number": bag_no, "shade": shade_str, "label": label})
+                label = f"{bag_no} ({shade_str})" if shade_str else str(bag_no)
+                data.append({"id": b_id, "bag_number": str(bag_no), "shade": shade_str, "label": label})
         except Exception as e:
             print(f"[WARN] api_bags error: {e}")
     con.close()
@@ -1345,45 +1346,135 @@ def api_bags(plan_id=None):
 def api_lots(bag_number=None):
     if not bag_number:
         bag_number = request.args.get("bag_number") or request.args.get("bag") or ""
+    bag_id_param = request.args.get("bag_id") or ""
     bag_number = unquote(bag_number).strip() if bag_number else ""
     con = db(); cur = con.cursor()
     data = []
-    if bag_number:
-        clean_bag = bag_number.split('(')[0].strip()
-        try:
+
+    clean_bag = bag_number.split('(')[0].strip() if bag_number else ""
+
+    try:
+        matched_bag_ids = set()
+        matched_bag_numbers = set()
+
+        if bag_id_param and str(bag_id_param).strip().isdigit():
+            matched_bag_ids.add(int(bag_id_param))
+
+        if clean_bag:
+            matched_bag_numbers.add(clean_bag)
+            matched_bag_numbers.add(clean_bag.lower())
+
+            # Find bag(s) in bags table
             cur.execute("""
-                SELECT 
-                    l.lot_name, 
-                    l.needles, 
-                    l.fabric_weight as rem_weight,
-                    l.plan_weight,
-                    fr.barcode_used as barcode,
-                    m.machine_no,
-                    (SELECT COUNT(*) FROM fabric_rolls fr2 
-                     WHERE fr2.lot_name = l.lot_name AND (fr2.bag_number = b.bag_number OR fr2.bag_number = ?)) as roll_count
-                FROM lots l
-                JOIN bags b ON l.bag_id = b.id
-                LEFT JOIN fabric_rolls fr ON ((fr.bag_number = b.bag_number OR fr.bag_number = ?) AND fr.lot_name = l.lot_name)
-                LEFT JOIN machine_assignments m ON fr.barcode_used = m.unique_code
-                WHERE LOWER(TRIM(b.bag_number)) = LOWER(TRIM(?))
-                   OR LOWER(TRIM(b.bag_number)) = LOWER(TRIM(?))
-                   OR CAST(b.id AS CHAR) = ?
-                GROUP BY l.lot_name, fr.barcode_used, l.needles, l.fabric_weight, l.plan_weight, m.machine_no, b.bag_number
-                ORDER BY l.id ASC
-            """, (clean_bag, clean_bag, bag_number, clean_bag, clean_bag))
-            rows = cur.fetchall()
-            seen = set()
-            for row in rows:
-                item = dict(row)
-                if item.get('roll_count', 0) == 0:
-                    item['barcode'] = None
-                    item['machine_no'] = None
-                key = f"{item['lot_name']}_{item.get('barcode')}"
-                if key not in seen:
-                    data.append(item)
-                    seen.add(key)
-        except Exception as e:
-            print(f"[WARN] api_lots error: {e}")
+                SELECT id, bag_number FROM bags 
+                WHERE LOWER(TRIM(bag_number)) = LOWER(TRIM(?))
+                   OR LOWER(TRIM(bag_number)) = LOWER(TRIM(?))
+                   OR CAST(id AS CHAR) = ?
+                   OR LOWER(TRIM(bag_number)) LIKE LOWER(TRIM(?))
+            """, (bag_number, clean_bag, clean_bag, f"%{clean_bag}%"))
+            for r in cur.fetchall():
+                b_id = r.get('id') if isinstance(r, dict) else r[0]
+                b_no = r.get('bag_number') if isinstance(r, dict) else (r[1] if len(r) > 1 else None)
+                if b_id is not None:
+                    matched_bag_ids.add(b_id)
+                if b_no:
+                    matched_bag_numbers.add(str(b_no))
+                    matched_bag_numbers.add(str(b_no).lower())
+
+        if clean_bag and clean_bag.isdigit():
+            matched_bag_ids.add(int(clean_bag))
+
+        raw_lots = []
+        seen_lot_ids = set()
+
+        # Query lots directly by bag_id (same reliable query as PPC)
+        for b_id in matched_bag_ids:
+            cur.execute("""
+                SELECT id, bag_id, lot_name, fabric_length, fabric_weight, plan_weight, bag_weight, needles, job_id, remarks
+                FROM lots
+                WHERE bag_id = ?
+                ORDER BY id ASC
+            """, (b_id,))
+            for l in cur.fetchall():
+                l_dict = dict(l)
+                if l_dict['id'] not in seen_lot_ids:
+                    seen_lot_ids.add(l_dict['id'])
+                    raw_lots.append(l_dict)
+
+        # Fallback: query lots by lot_name if still empty
+        if not raw_lots and clean_bag:
+            cur.execute("""
+                SELECT id, bag_id, lot_name, fabric_length, fabric_weight, plan_weight, bag_weight, needles, job_id, remarks
+                FROM lots
+                WHERE LOWER(TRIM(lot_name)) = LOWER(TRIM(?))
+                ORDER BY id ASC
+            """, (clean_bag,))
+            for l in cur.fetchall():
+                l_dict = dict(l)
+                if l_dict['id'] not in seen_lot_ids:
+                    seen_lot_ids.add(l_dict['id'])
+                    raw_lots.append(l_dict)
+
+        # Build response with roll count and last barcode
+        for l in raw_lots:
+            lot_name = l.get('lot_name')
+            b_id = l.get('bag_id')
+
+            cur.execute("""
+                SELECT barcode_used, machine_no
+                FROM fabric_rolls
+                WHERE LOWER(TRIM(lot_name)) = LOWER(TRIM(?))
+                ORDER BY id DESC LIMIT 1
+            """, (lot_name,))
+            last_roll = cur.fetchone()
+
+            cur.execute("""
+                SELECT COUNT(*) as cnt FROM fabric_rolls 
+                WHERE LOWER(TRIM(lot_name)) = LOWER(TRIM(?))
+            """, (lot_name,))
+            rc_res = cur.fetchone()
+            rc = (rc_res.get('cnt') if isinstance(rc_res, dict) else rc_res[0]) if rc_res else 0
+
+            weight_val = float(l.get('fabric_weight') or 0)
+            plan_val = float(l.get('plan_weight') or weight_val)
+
+            item = {
+                "id": l.get('id'),
+                "bag_id": b_id,
+                "lot_name": lot_name,
+                "needles": l.get('needles') or '24N',
+                "fabric_weight": weight_val,
+                "rem_weight": weight_val,
+                "plan_weight": plan_val,
+                "barcode": (last_roll.get('barcode_used') if isinstance(last_roll, dict) else last_roll[0]) if last_roll and rc > 0 else None,
+                "machine_no": (last_roll.get('machine_no') if isinstance(last_roll, dict) else (last_roll[1] if len(last_roll) > 1 else None)) if last_roll and rc > 0 else None,
+                "roll_count": rc
+            }
+            data.append(item)
+
+    except Exception as e:
+        print(f"[ERROR] api_lots error: {e}")
+        try:
+            if clean_bag:
+                cur.execute("SELECT * FROM lots WHERE LOWER(TRIM(lot_name)) = LOWER(TRIM(?)) OR CAST(bag_id AS CHAR) = ?", (clean_bag, clean_bag))
+                for l in cur.fetchall():
+                    ld = dict(l)
+                    w = float(ld.get('fabric_weight') or 0)
+                    data.append({
+                        "id": ld.get('id'),
+                        "bag_id": ld.get('bag_id'),
+                        "lot_name": ld.get('lot_name'),
+                        "needles": ld.get('needles') or '24N',
+                        "fabric_weight": w,
+                        "rem_weight": w,
+                        "plan_weight": float(ld.get('plan_weight') or w),
+                        "barcode": None,
+                        "machine_no": None,
+                        "roll_count": 0
+                    })
+        except Exception:
+            pass
+
     con.close()
     return jsonify(data)
 

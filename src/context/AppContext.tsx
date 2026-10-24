@@ -1114,7 +1114,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
              String(b.id) === raw;
     });
 
-    if (!bag) return [];
+    if (!bag) {
+      return lots
+        .filter(l =>
+          String(l.bag_id) === cleanBagNo ||
+          l.lot_name.trim().toLowerCase() === cleanBagNo ||
+          (l as any).bag_number?.trim().toLowerCase() === cleanBagNo
+        )
+        .map(l => ({
+          id: l.id,
+          bag_id: l.bag_id,
+          lot_name: l.lot_name,
+          needles: l.needles || '24N',
+          fabric_weight: Number(l.fabric_weight ?? l.rem_weight ?? 0),
+          rem_weight: Number(l.fabric_weight ?? l.rem_weight ?? 0),
+          plan_weight: Number(l.plan_weight ?? 0),
+          barcode: null,
+          machine_no: null,
+          roll_count: 0
+        }));
+    }
     const bagIdStr = String(bag.id);
     const targetBagNo = bag.bag_number.trim().toLowerCase();
 
@@ -1122,6 +1141,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .filter(l => {
         if (l.bag_id === bag.id) return true;
         if (String(l.bag_id) === bagIdStr) return true;
+        if (l.lot_name.trim().toLowerCase() === cleanBagNo) return true;
         if ((l as any).bag_number && String((l as any).bag_number).trim().toLowerCase() === targetBagNo) return true;
         return false;
       })

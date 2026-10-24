@@ -369,7 +369,7 @@ CREATE TABLE `machine_assignments` (
   `shade` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `unique_code` (`unique_code`)
-) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -378,7 +378,7 @@ CREATE TABLE `machine_assignments` (
 
 LOCK TABLES `machine_assignments` WRITE;
 /*!40000 ALTER TABLE `machine_assignments` DISABLE KEYS */;
-INSERT INTO `machine_assignments` VALUES (1,'2/22398','1512','11',1,'17665','2026-10-23 15:59','22398',NULL),(2,'3/22398','2660','19',1,'05453','2026-10-23 16:27','22398','Red'),(5,'1/1','1512','7',1,'85456','2026-10-24 12:13','1','Black'),(6,'2/22398','1512','55',1,'80244','2026-10-24 12:16','22398','Navy Blue'),(7,'3/22398','2660','99',1,'72003','2026-10-24 12:19','22398','Red');
+INSERT INTO `machine_assignments` VALUES (1,'2/22398','1512','11',1,'17665','2026-10-23 15:59','22398',NULL),(2,'3/22398','2660','19',1,'05453','2026-10-23 16:27','22398','Red'),(5,'1/1','1512','7',1,'85456','2026-10-24 12:13','1','Black'),(6,'2/22398','1512','55',1,'80244','2026-10-24 12:16','22398','Navy Blue'),(7,'3/22398','2660','99',1,'72003','2026-10-24 12:19','22398','Red'),(8,'1/88','2660','55',1,'97364','2026-10-24 12:23','88','sky Blue');
 /*!40000 ALTER TABLE `machine_assignments` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -628,4 +628,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-10-24 12:22:29
+-- Dump completed on 2026-10-24 12:23:31

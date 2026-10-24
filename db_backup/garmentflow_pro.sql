@@ -378,7 +378,7 @@ CREATE TABLE `machine_assignments` (
 
 LOCK TABLES `machine_assignments` WRITE;
 /*!40000 ALTER TABLE `machine_assignments` DISABLE KEYS */;
-INSERT INTO `machine_assignments` VALUES (1,'2/22398','1512','11',1,'17665','2026-10-23 15:59','22398',NULL),(2,'3/22398','2660','19',1,'05453','2026-10-23 16:27','22398','Red'),(3,'1/786','2660','19',1,'74533','2026-10-24 11:49','786','White');
+INSERT INTO `machine_assignments` VALUES (1,'2/22398','1512','11',1,'17665','2026-10-23 15:59','22398',NULL),(2,'3/22398','2660','19',1,'05453','2026-10-23 16:27','22398','Red');
 /*!40000 ALTER TABLE `machine_assignments` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -628,4 +628,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-10-24 12:12:06
+-- Dump completed on 2026-10-24 12:13:09

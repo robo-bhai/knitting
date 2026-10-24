@@ -113,8 +113,10 @@ export interface FabricRoll {
   needles: string;
   created_at: string;
   barcode_used: string; // Machine assignment 5-digit code used
-  roll_barcode: string; // 7-digit unique roll barcode
+  roll_barcode: string; // Series-wise or unique roll barcode
   machine_no: string;
+  is_merged?: boolean;
+  merge_count?: number;
 }
 
 export interface QualityCheck {
@@ -171,4 +173,6 @@ export interface RollSticker {
   date: string;
   qw?: number | string;
   pw?: number;
+  is_merged?: boolean;
+  merged_added?: number;
 }

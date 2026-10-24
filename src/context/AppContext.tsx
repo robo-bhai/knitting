@@ -62,7 +62,25 @@ interface AppContextType {
   deleteMachineAssignment: (id: number) => void;
 
   // Roll Entry & Tracking
-  saveRoll: (data: { work_order: string; plan_id: string; bag_number: string; lot_name: string; needles: string; weight: number; tube_no?: string; barcode: string }) => { success: boolean; message?: string; sticker?: RollSticker };
+  saveRoll: (data: {
+    work_order: string;
+    plan_id: string;
+    bag_number: string;
+    lot_name: string;
+    needles: string;
+    weight: number;
+    tube_no?: string;
+    barcode: string;
+    target_roll_no?: number;
+  }) => {
+    success: boolean;
+    message?: string;
+    sticker?: RollSticker;
+    is_merged?: boolean;
+    mismatch_type?: string;
+    machine_spec?: any;
+    lot_spec?: any;
+  };
   editRoll: (rollId: number, newWeight: number) => { success: boolean; message: string };
   deleteRoll: (rollId: number) => { success: boolean; message: string };
 
@@ -670,55 +688,151 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     weight: number;
     tube_no?: string;
     barcode: string;
+    target_roll_no?: number;
   }) => {
     // 1. Identify Bag and Shade
-    const bag = bags.find(b => b.bag_number === data.bag_number);
+    const bag = bags.find(b => b.bag_number.trim().toLowerCase() === data.bag_number.trim().toLowerCase());
     if (!bag) {
-      return { success: false, message: 'Bag/Work Order not found!' };
+      return { success: false, message: 'Bag/Work Order not found in PPC!' };
     }
     const shade = bag.shade;
-    const woVal = data.work_order;
+    const woVal = data.work_order.trim();
 
-    // 2. Identify Job ID
-    const jobRow = jobs.find(
-      j => j.work_order_ref === woVal &&
-           j.shade_ref.toLowerCase() === shade.toLowerCase() &&
-           j.needles_ref.toUpperCase().startsWith(data.needles.toUpperCase().replace('N', ''))
-    );
-    if (!jobRow) {
-      return { success: false, message: 'No Job record found for this Shade/Needles combo!' };
+    // 2. Validate 5-Digit Machine Barcode
+    const barcodeScanned = data.barcode.trim();
+    if (!barcodeScanned) {
+      return { success: false, message: '5-Digit Machine Barcode is required!' };
     }
-    const currentJobFull = `${jobRow.job}/${woVal}`;
 
-    // 3. Validate Machine Barcode
-    const mAssignment = machineAssignments.find(m => m.unique_code === data.barcode);
+    const mAssignment = machineAssignments.find(m => m.unique_code.trim() === barcodeScanned);
     if (!mAssignment) {
-      return { success: false, message: 'Invalid Machine Barcode! Ensure machine is signed in.' };
-    }
-
-    if (mAssignment.job_full_text !== currentJobFull) {
       return {
         success: false,
-        message: `BARCODE MISMATCH! This machine barcode is assigned to Job ${mAssignment.job_full_text}. You are feeding ${shade} (${currentJobFull}).`
+        mismatch_type: 'barcode_not_found',
+        message: `5-Digit Machine Barcode '${barcodeScanned}' is not signed! Please Sign In Machine (/machine-sign) first.`
       };
     }
 
-    // 4. Generate Unique 7-digit roll barcode
-    let uniqueRollId = '';
-    do {
-      uniqueRollId = Math.floor(1000000 + Math.random() * 9000000).toString();
-    } while (rolls.some(r => r.roll_barcode === uniqueRollId));
+    // Determine machine specs
+    const mNeedles = (mAssignment.needles || '').trim().toUpperCase();
+    const lotNeedles = (data.needles || '').trim().toUpperCase();
 
-    // 5. Sequential roll number per Job
-    const existingJobRolls = rolls.filter(
-      r => r.work_order === woVal &&
-           bags.find(b => b.bag_number === r.bag_number)?.shade === shade &&
-           r.needles.toUpperCase().startsWith(data.needles.toUpperCase().replace('N', ''))
-    );
-    const maxRollNo = existingJobRolls.reduce((max, r) => Math.max(max, r.roll_no), 0);
-    const newRollNo = maxRollNo + 1;
+    let mWo = '';
+    if (mAssignment.job_full_text && mAssignment.job_full_text.includes('/')) {
+      mWo = mAssignment.job_full_text.split('/')[1].trim().toUpperCase();
+    }
+    const cleanWo = woVal.split('/').pop()?.trim().toUpperCase() || woVal.toUpperCase();
 
-    // 6. Insert Roll
+    const machineSpec = {
+      unique_code: barcodeScanned,
+      machine_no: mAssignment.machine_no,
+      needles: mNeedles,
+      shade: shade,
+      work_order: mWo || cleanWo
+    };
+
+    // Needles validation
+    if (mNeedles && lotNeedles && mNeedles !== lotNeedles) {
+      return {
+        success: false,
+        mismatch_type: 'needles',
+        message: `Needles Mismatch! Machine signed barcode has needles '${mNeedles}', but selected Lot requires '${lotNeedles}'.`,
+        machine_spec: machineSpec,
+        lot_spec: { needles: lotNeedles, shade, work_order: woVal }
+      };
+    }
+
+    // Work order validation
+    if (mWo && cleanWo && mWo !== cleanWo) {
+      return {
+        success: false,
+        mismatch_type: 'work_order',
+        message: `Work Order Mismatch! 5-Digit Barcode '${barcodeScanned}' is signed for Work Order '${mWo}', but selected Work Order is '${woVal}'.`,
+        machine_spec: machineSpec,
+        lot_spec: { needles: lotNeedles, shade, work_order: woVal }
+      };
+    }
+
+    const currentJobFull = mAssignment.job_full_text || `Job-1/${woVal}`;
+
+    // 3. Check if target roll already exists for Merge
+    const targetRoll = data.target_roll_no;
+    let existingRoll = null;
+    if (targetRoll !== undefined && targetRoll !== null && !isNaN(targetRoll) && targetRoll > 0) {
+      existingRoll = rolls.find(
+        r => r.work_order.trim().toLowerCase() === woVal.toLowerCase() &&
+             r.bag_number.trim().toLowerCase() === data.bag_number.trim().toLowerCase() &&
+             r.lot_name.trim().toLowerCase() === data.lot_name.trim().toLowerCase() &&
+             r.roll_no === targetRoll
+      );
+    }
+
+    const addedWeight = Number(data.weight);
+
+    if (existingRoll) {
+      // MERGE WEIGHT
+      const oldWeight = existingRoll.weight;
+      const mergedWeight = Math.round((oldWeight + addedWeight) * 100) / 100;
+      const mergeCount = (existingRoll.merge_count || 0) + 1;
+      const rollBarcode = existingRoll.roll_barcode || `R-${data.bag_number.replace(/[^a-zA-Z0-9]/g, '')}-${String(targetRoll).padStart(2, '0')}`;
+
+      setRolls(prev => prev.map(r => r.id === existingRoll!.id ? {
+        ...r,
+        weight: mergedWeight,
+        tube_no: data.tube_no || r.tube_no,
+        barcode_used: barcodeScanned,
+        machine_no: mAssignment.machine_no,
+        is_merged: true,
+        merge_count: mergeCount
+      } : r));
+
+      // Deduct added weight from Lot Balance
+      setLots(prev =>
+        prev.map(l => {
+          if (l.lot_name.trim().toLowerCase() === data.lot_name.trim().toLowerCase() && l.bag_id === bag.id) {
+            return { ...l, fabric_weight: Math.max(0, Math.round((l.fabric_weight - addedWeight) * 100) / 100) };
+          }
+          return l;
+        })
+      );
+
+      const sticker: RollSticker = {
+        roll_barcode: rollBarcode,
+        bag: data.bag_number,
+        lot: data.lot_name,
+        roll_no: targetRoll!,
+        job_wo: currentJobFull,
+        needle: data.needles,
+        shade,
+        machine: mAssignment.machine_no,
+        weight: mergedWeight,
+        date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        is_merged: true,
+        merged_added: addedWeight
+      };
+
+      showFlash(`Roll #${targetRoll} already exists! Merged +${addedWeight} KG. New Weight: ${mergedWeight} KG`, 'success');
+      return { success: true, is_merged: true, sticker };
+    }
+
+    // 4. New Sequential Roll
+    let newRollNo = 1;
+    if (targetRoll !== undefined && targetRoll !== null && !isNaN(targetRoll) && targetRoll > 0) {
+      newRollNo = targetRoll;
+    } else {
+      const lotRolls = rolls.filter(
+        r => r.work_order.trim().toLowerCase() === woVal.toLowerCase() &&
+             r.bag_number.trim().toLowerCase() === data.bag_number.trim().toLowerCase() &&
+             r.lot_name.trim().toLowerCase() === data.lot_name.trim().toLowerCase()
+      );
+      const maxNo = lotRolls.reduce((max, r) => Math.max(max, r.roll_no), 0);
+      newRollNo = maxNo + 1;
+    }
+
+    // Series-wise barcode: 1 k bad 2 k bad 3: e.g. R-BAG880101-01, R-BAG880101-02
+    const cleanBagStr = data.bag_number.replace(/[^a-zA-Z0-9]/g, '');
+    const seriesBarcode = `R-${cleanBagStr}-${String(newRollNo).padStart(2, '0')}`;
+
     const newRoll: FabricRoll = {
       id: Date.now(),
       work_order: woVal,
@@ -726,29 +840,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       bag_number: data.bag_number,
       lot_name: data.lot_name,
       roll_no: newRollNo,
-      weight: Number(data.weight),
-      tube_no: data.tube_no || `T-${newRollNo}`,
+      weight: addedWeight,
+      tube_no: data.tube_no || `T-${newRollNo + 100}`,
       needles: data.needles,
       created_at: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      barcode_used: data.barcode,
-      roll_barcode: uniqueRollId,
-      machine_no: mAssignment.machine_no
+      barcode_used: barcodeScanned,
+      roll_barcode: seriesBarcode,
+      machine_no: mAssignment.machine_no,
+      is_merged: false,
+      merge_count: 0
     };
 
     setRolls(prev => [...prev, newRoll]);
 
-    // 7. Deduct weight from PPC Lot Balance
+    // Deduct weight from PPC Lot Balance
     setLots(prev =>
       prev.map(l => {
-        if (l.lot_name === data.lot_name && l.needles === data.needles && l.bag_id === bag.id) {
-          return { ...l, fabric_weight: Math.max(0, l.fabric_weight - Number(data.weight)) };
+        if (l.lot_name.trim().toLowerCase() === data.lot_name.trim().toLowerCase() && l.bag_id === bag.id) {
+          return { ...l, fabric_weight: Math.max(0, Math.round((l.fabric_weight - addedWeight) * 100) / 100) };
         }
         return l;
       })
     );
 
     const sticker: RollSticker = {
-      roll_barcode: uniqueRollId,
+      roll_barcode: seriesBarcode,
       bag: data.bag_number,
       lot: data.lot_name,
       roll_no: newRollNo,
@@ -756,12 +872,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       needle: data.needles,
       shade,
       machine: mAssignment.machine_no,
-      weight: data.weight,
-      date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      weight: addedWeight,
+      date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      is_merged: false
     };
 
-    showFlash(`Roll #${newRollNo} saved! Barcode: ${uniqueRollId}`, 'success');
-    return { success: true, sticker };
+    showFlash(`Roll #${newRollNo} fed successfully! Barcode: ${seriesBarcode}`, 'success');
+    return { success: true, is_merged: false, sticker };
   };
 
   // Edit Roll Handler (checks lock on finalized/dispatched bag, adjusts balance)
@@ -984,7 +1101,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const getLotsForBag = (bagNumber: string) => {
-    const bag = bags.find(b => b.bag_number === bagNumber);
+    const bag = bags.find(b => b.bag_number.trim().toLowerCase() === bagNumber.trim().toLowerCase());
     if (!bag) return [];
     return lots
       .filter(l => l.bag_id === bag.id)
@@ -993,10 +1110,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const lastRollWithBarcode = lotRolls.find(r => r.barcode_used);
         const mAssigned = lastRollWithBarcode ? machineAssignments.find(m => m.unique_code === lastRollWithBarcode.barcode_used) : null;
         return {
+          id: l.id,
+          bag_id: l.bag_id,
           lot_name: l.lot_name,
           needles: l.needles,
-          rem_weight: l.fabric_weight,
-          plan_weight: l.plan_weight,
+          fabric_weight: Number(l.fabric_weight ?? 0),
+          rem_weight: Number(l.fabric_weight ?? 0),
+          plan_weight: Number(l.plan_weight ?? 0),
           barcode: lastRollWithBarcode?.barcode_used || null,
           machine_no: mAssigned?.machine_no || null,
           roll_count: lotRolls.length

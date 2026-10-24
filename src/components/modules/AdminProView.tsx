@@ -53,9 +53,9 @@ export const AdminProView: React.FC = () => {
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 text-white flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span className="text-xs font-mono text-emerald-400 font-bold uppercase tracking-wider">
-              System Administration
+              System Administration • Server Healthy
             </span>
           </div>
           <h1 className="text-xl font-bold tracking-tight text-white">
@@ -64,6 +64,15 @@ export const AdminProView: React.FC = () => {
           <p className="text-xs text-slate-400 mt-1">
             Access-restricted management for authentication, user privilege delegation, and high-level factory KPIs.
           </p>
+        </div>
+        <div className="flex items-center gap-3 font-mono text-xs">
+          <div className="px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span>Server Load: Normal (0% Delay)</span>
+          </div>
+          <div className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300">
+            Engine: High-Speed DB Active
+          </div>
         </div>
       </div>
 

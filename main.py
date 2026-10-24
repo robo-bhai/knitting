@@ -109,7 +109,7 @@ def db():
     global DB_TYPE
     if DB_TYPE == "mysql" and MYSQL_AVAILABLE:
         try:
-            # First attempt connection via PyMySQL
+            # First attempt connection via PyMySQL with fast failover
             try:
                 import pymysql
                 import pymysql.cursors
@@ -123,9 +123,9 @@ def db():
                     charset='utf8mb4',
                     cursorclass=pymysql.cursors.DictCursor,
                     autocommit=True,
-                    connect_timeout=10,
-                    read_timeout=15,
-                    write_timeout=15,
+                    connect_timeout=2,
+                    read_timeout=3,
+                    write_timeout=3,
                     **ssl_dict
                 )
                 return MySQLConnectionWrapper(conn)
@@ -138,12 +138,13 @@ def db():
                     password=MYSQL_PASSWORD,
                     database=MYSQL_DB,
                     charset='utf8mb4',
-                    connection_timeout=10,
+                    connection_timeout=2,
                     autocommit=True
                 )
                 return MySQLConnectionWrapper(conn)
         except Exception as e:
-            print(f"[DB WARNING] Failed to connect to MySQL ({e}). Falling back to SQLite.")
+            print(f"[DB WARNING] Failed to connect to MySQL ({e}). Fast switching to SQLite to avoid server overload.")
+            DB_TYPE = "sqlite"
 
     # SQLite Connection Fallback
     import sqlite3
@@ -1279,6 +1280,29 @@ def api_plans(work_order=None):
                     plans_list.append(final_code)
         except Exception as e:
             print(f"[WARN] api_plans fallback error: {e}")
+
+    # Extra relaxed fallback: match alphanumeric tokens
+    if not plans_list and work_order:
+        try:
+            alphanumeric_wo = ''.join(c for c in work_order if c.isalnum()).lower()
+            cur.execute("""
+                SELECT p.id, p.plan_id, wo.work_order
+                FROM plans p
+                LEFT JOIN work_orders wo ON p.work_order_id = wo.id
+            """)
+            for r in cur.fetchall():
+                p_id = r.get('id') if isinstance(r, dict) else r[0]
+                p_code = r.get('plan_id') if isinstance(r, dict) else (r[1] if len(r) > 1 else None)
+                wo_name = (r.get('work_order') if isinstance(r, dict) else (r[2] if len(r) > 2 else '')) or ''
+                p_clean = ''.join(c for c in (p_code or '') if c.isalnum()).lower()
+                wo_clean = ''.join(c for c in wo_name if c.isalnum()).lower()
+                if alphanumeric_wo and (alphanumeric_wo in p_clean or alphanumeric_wo in wo_clean or (wo_clean and wo_clean in alphanumeric_wo)):
+                    final_code = (p_code or '').strip() or f"Plan-{p_id}"
+                    if final_code not in seen:
+                        seen.add(final_code)
+                        plans_list.append(final_code)
+        except Exception:
+            pass
 
     con.close()
     return jsonify(plans_list)

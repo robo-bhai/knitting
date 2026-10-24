@@ -129,6 +129,8 @@ CREATE TABLE `fabric_rolls` (
   `barcode_used` varchar(255) DEFAULT NULL,
   `roll_barcode` varchar(255) DEFAULT NULL,
   `machine_no` varchar(255) DEFAULT NULL,
+  `is_merged` int DEFAULT '0',
+  `merge_count` int DEFAULT '0',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -626,4 +628,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-10-23 21:17:47
+-- Dump completed on 2026-10-24  9:19:01

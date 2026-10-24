@@ -36,109 +36,113 @@ export const LoginView: React.FC<Props> = ({ onSuccess }) => {
 
   return (
     <div className="min-h-[80vh] flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full overflow-hidden">
-        {/* Banner */}
-        <div className="bg-slate-900 p-6 text-white text-center">
-          <div className="w-12 h-12 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto mb-3">
+      <div className="bg-gradient-to-b from-slate-100 via-slate-200 to-slate-300 rounded-xl border-2 border-slate-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_4px_12px_rgba(0,0,0,0.15)] max-w-md w-full overflow-hidden">
+        {/* Banner - Oracle ERP Silver Titlebar */}
+        <div className="bg-gradient-to-r from-slate-700 via-slate-800 to-slate-700 p-5 text-white text-center border-b border-slate-600 shadow-md">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-b from-blue-500/20 to-blue-700/30 border border-blue-400 text-blue-300 flex items-center justify-center mx-auto mb-2.5 shadow-inner">
             <Factory className="w-6 h-6" />
           </div>
-          <h1 className="text-xl font-black uppercase tracking-tight">TEXFLOW INDUSTRIAL ERP</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Manufacturing & Garment Management System
+          <h1 className="text-lg font-black uppercase tracking-wider text-slate-100">TEXFLOW INDUSTRIAL ERP</h1>
+          <p className="text-xs text-slate-300 mt-0.5 font-mono">
+            Oracle Suite &bull; Garment &amp; Textile Execution
           </p>
         </div>
 
         {/* Form */}
         <div className="p-6">
-          <h2 className="font-bold text-sm text-slate-900 mb-1">Sign In to Your Station</h2>
-          <p className="text-xs text-slate-500 mb-4">Role-based authentication gateway (/login)</p>
+          <div className="flex items-center justify-between mb-3 border-b border-slate-300 pb-2">
+            <h2 className="font-extrabold text-xs uppercase tracking-wider text-slate-800">Station Authentication</h2>
+            <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-900 border border-blue-300">
+              ORCL-LOGIN
+            </span>
+          </div>
 
           {errorMsg && (
-            <div className="mb-4 p-3 bg-rose-50 border border-rose-300 rounded-lg text-xs text-rose-800">
+            <div className="mb-4 p-2.5 bg-rose-100 border border-rose-400 rounded text-xs text-rose-950 font-medium">
               {errorMsg}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-3.5">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Username / Station ID</label>
+              <label className="block text-[11px] font-bold uppercase text-slate-800 mb-1">Username / Station ID</label>
               <div className="relative">
-                <User className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <User className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
                 <input
                   type="text"
                   required
                   placeholder="e.g. c1234, i1234, m1234, admin"
                   value={username}
                   onChange={e => setUsername(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                  className="w-full pl-9 pr-3 py-1.5 border-2 border-slate-400 rounded text-xs font-mono font-bold bg-white text-slate-900 shadow-inner focus:border-blue-700 focus:ring-1 focus:ring-blue-700 focus:outline-hidden"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Access Password</label>
+              <label className="block text-[11px] font-bold uppercase text-slate-800 mb-1">Access Password</label>
               <div className="relative">
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
                 <input
                   type="password"
                   required
                   placeholder="••••••••"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                  className="w-full pl-9 pr-3 py-1.5 border-2 border-slate-400 rounded text-xs font-mono bg-white text-slate-900 shadow-inner focus:border-blue-700 focus:ring-1 focus:ring-blue-700 focus:outline-hidden"
                 />
               </div>
             </div>
 
             <button
               type="submit"
-              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-colors mt-2"
+              className="w-full py-2 bg-gradient-to-b from-blue-700 via-blue-800 to-blue-900 hover:from-blue-600 hover:to-blue-800 text-white rounded text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-all border border-blue-950 mt-2 cursor-pointer active:shadow-inner"
             >
-              Sign In
-              <ArrowRight className="w-4 h-4 text-emerald-400" />
+              Sign In to Station
+              <ArrowRight className="w-4 h-4 text-emerald-300" />
             </button>
           </form>
 
-          {/* Quick 1-Click Role Login Shortcuts from main.py */}
-          <div className="mt-6 pt-5 border-t border-slate-100">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-2 text-center">
-              Quick Role Simulation (Credentials in main.py)
+          {/* Quick 1-Click Role Login Shortcuts */}
+          <div className="mt-5 pt-4 border-t border-slate-300">
+            <span className="text-[10px] font-bold text-slate-700 uppercase tracking-wider block mb-2 text-center">
+              Quick Role Simulation (Local Credentials)
             </span>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <button
                 type="button"
                 onClick={() => handleQuickLogin('admin', 'admin')}
-                className="p-2 border border-slate-200 hover:border-slate-400 rounded-lg text-left bg-slate-50 hover:bg-white transition-all"
+                className="p-2 border border-slate-400 hover:border-blue-700 rounded text-left bg-gradient-to-b from-slate-100 to-slate-200 hover:from-white hover:to-slate-100 transition-all shadow-2xs cursor-pointer"
               >
-                <span className="font-bold text-slate-900 block">ADMIN</span>
-                <span className="text-[10px] text-slate-500 font-mono">admin (Root)</span>
+                <span className="font-bold text-slate-900 block text-xs">ADMIN</span>
+                <span className="text-[10px] text-slate-600 font-mono">admin (Root)</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => handleQuickLogin('m1234', 'manager')}
-                className="p-2 border border-slate-200 hover:border-slate-400 rounded-lg text-left bg-slate-50 hover:bg-white transition-all"
+                className="p-2 border border-slate-400 hover:border-blue-700 rounded text-left bg-gradient-to-b from-slate-100 to-slate-200 hover:from-white hover:to-slate-100 transition-all shadow-2xs cursor-pointer"
               >
-                <span className="font-bold text-slate-900 block">MANAGER</span>
-                <span className="text-[10px] text-slate-500 font-mono">m1234 / mp1234</span>
+                <span className="font-bold text-slate-900 block text-xs">MANAGER</span>
+                <span className="text-[10px] text-slate-600 font-mono">m1234 / mp1234</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => handleQuickLogin('i1234', 'incharge')}
-                className="p-2 border border-slate-200 hover:border-slate-400 rounded-lg text-left bg-slate-50 hover:bg-white transition-all"
+                className="p-2 border border-slate-400 hover:border-blue-700 rounded text-left bg-gradient-to-b from-slate-100 to-slate-200 hover:from-white hover:to-slate-100 transition-all shadow-2xs cursor-pointer"
               >
-                <span className="font-bold text-slate-900 block">INCHARGE</span>
-                <span className="text-[10px] text-slate-500 font-mono">i1234 / ip1234</span>
+                <span className="font-bold text-slate-900 block text-xs">INCHARGE</span>
+                <span className="text-[10px] text-slate-600 font-mono">i1234 / ip1234</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => handleQuickLogin('c1234', 'clerk')}
-                className="p-2 border border-slate-200 hover:border-slate-400 rounded-lg text-left bg-slate-50 hover:bg-white transition-all"
+                className="p-2 border border-slate-400 hover:border-blue-700 rounded text-left bg-gradient-to-b from-slate-100 to-slate-200 hover:from-white hover:to-slate-100 transition-all shadow-2xs cursor-pointer"
               >
-                <span className="font-bold text-slate-900 block">CLERK</span>
-                <span className="text-[10px] text-slate-500 font-mono">c1234 / cp1234</span>
+                <span className="font-bold text-slate-900 block text-xs">CLERK</span>
+                <span className="text-[10px] text-slate-600 font-mono">c1234 / cp1234</span>
               </button>
             </div>
           </div>

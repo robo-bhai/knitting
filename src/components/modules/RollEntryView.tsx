@@ -5,7 +5,7 @@ import { ThermalStickerModal } from '../common/ThermalStickerModal';
 import {
   ScrollText, Printer, Layers, Tag, Cpu, RefreshCw, Copy, Check,
   AlertTriangle, CheckCircle2, XCircle, ArrowRight, FileText,
-  Filter, Info, ShieldCheck, ChevronRight
+  Filter, Info, ShieldCheck, ChevronRight, Hash, Database
 } from 'lucide-react';
 
 export const RollEntryView: React.FC = () => {
@@ -14,8 +14,8 @@ export const RollEntryView: React.FC = () => {
     getLotsForBag, saveRoll, machineAssignments, rolls
   } = useApp();
 
-  // Filter mode: Complete Series Only (default requested) or All Work Orders
-  const [completeSeriesOnly, setCompleteSeriesOnly] = useState<boolean>(true);
+  // Filter mode: Complete Series Only vs All PPC Work Orders
+  const [completeSeriesOnly, setCompleteSeriesOnly] = useState<boolean>(false);
 
   // Cascading Selection State
   const [woInput, setWoInput] = useState<string>('');
@@ -51,21 +51,17 @@ export const RollEntryView: React.FC = () => {
   // 1. Identify Work Orders with Complete Series: WO > Plan > Bag > Lot > Machine Sign
   const completeSeriesWos = useMemo(() => {
     return workOrders.filter(wo => {
-      // Find plans for this WO
       const woPlans = plans.filter(p => p.work_order_id === wo.id || String(p.work_order_id) === String(wo.id));
       if (woPlans.length === 0) return false;
 
-      // Find bags for these plans
       const woPlanIds = woPlans.map(p => p.id);
-      const woBags = bags.filter(b => woPlanIds.includes(b.plan_id));
+      const woBags = bags.filter(b => woPlanIds.includes(b.plan_id) || woPlanIds.map(String).includes(String(b.plan_id)));
       if (woBags.length === 0) return false;
 
-      // Find lots for these bags
       const woBagIds = woBags.map(b => b.id);
-      const woLots = lots.filter(l => woBagIds.includes(l.bag_id));
+      const woLots = lots.filter(l => woBagIds.includes(l.bag_id) || woBagIds.map(String).includes(String(l.bag_id)));
       if (woLots.length === 0) return false;
 
-      // Check if machine signed for this WO
       const hasMachine = machineAssignments.some(m => {
         const text = m.job_full_text || '';
         return text.toLowerCase().includes(wo.work_order.toLowerCase()) ||
@@ -83,36 +79,51 @@ export const RollEntryView: React.FC = () => {
     return workOrders;
   }, [completeSeriesOnly, completeSeriesWos, workOrders]);
 
-  // Set default WO on load if not set
+  // Set default WO on initial load if none selected
   useEffect(() => {
     if (!woInput && displayedWorkOrders.length > 0) {
       const defaultWo = displayedWorkOrders[0].work_order;
       setWoInput(defaultWo);
-      triggerWoCascade(defaultWo);
     }
-  }, [displayedWorkOrders]);
+  }, [displayedWorkOrders, woInput]);
 
   // Robust matching for Plans belonging to the selected Work Order
   const availablePlans = useMemo(() => {
     if (!woInput.trim()) return [];
-    const cleanWo = woInput.trim().toLowerCase().split('/').pop()?.trim() || woInput.trim().toLowerCase();
+    const rawWo = woInput.trim();
+    const cleanWo = rawWo.toLowerCase().split('/').pop()?.trim() || rawWo.toLowerCase();
 
     // Match work order by name or ID
     const woObj = workOrders.find(w =>
       w.work_order.toLowerCase().trim() === cleanWo ||
-      w.work_order.toLowerCase().trim() === woInput.trim().toLowerCase() ||
-      String(w.id) === cleanWo
+      w.work_order.toLowerCase().trim() === rawWo.toLowerCase() ||
+      String(w.id) === cleanWo ||
+      cleanWo.includes(w.work_order.toLowerCase().trim()) ||
+      w.work_order.toLowerCase().trim().includes(cleanWo)
     );
 
     return plans.filter(p => {
-      if (woObj && p.work_order_id === woObj.id) return true;
-      if (String(p.work_order_id) === String(woObj?.id)) return true;
+      if (woObj && (p.work_order_id === woObj.id || String(p.work_order_id) === String(woObj.id))) return true;
       if (String(p.work_order_id).toLowerCase() === cleanWo) return true;
       if ((p as any).work_order && (p as any).work_order.toLowerCase().trim() === cleanWo) return true;
-      if (p.plan_id.toLowerCase().includes(cleanWo.replace(/[^a-z0-9]/g, ''))) return true;
+      // Also match by plan_id naming pattern if it contains WO numbers
+      const numPart = cleanWo.replace(/\D/g, '');
+      if (numPart && numPart.length >= 3 && p.plan_id.toLowerCase().includes(numPart)) return true;
       return false;
     });
   }, [woInput, workOrders, plans]);
+
+  // Effect 1: Auto-select or maintain Plan when availablePlans changes
+  useEffect(() => {
+    if (availablePlans.length > 0) {
+      const exists = availablePlans.some(p => p.plan_id.toLowerCase().trim() === selectedPlan.toLowerCase().trim());
+      if (!exists) {
+        setSelectedPlan(availablePlans[0].plan_id);
+      }
+    } else {
+      setSelectedPlan('');
+    }
+  }, [availablePlans, selectedPlan]);
 
   // Available Bags for the selected Plan
   const availableBags = useMemo(() => {
@@ -125,27 +136,106 @@ export const RollEntryView: React.FC = () => {
     });
   }, [selectedPlan, plans, bags, finalizedBags]);
 
-  // Available Lots for the selected Bag
+  // Effect 2: Auto-select or maintain Bag when availableBags changes
+  useEffect(() => {
+    if (availableBags.length > 0) {
+      const exists = availableBags.some(b => b.bag_number.toLowerCase().trim() === selectedBag.toLowerCase().trim());
+      if (!exists) {
+        setSelectedBag(availableBags[0].bag_number);
+      }
+    } else {
+      setSelectedBag('');
+    }
+  }, [availableBags, selectedBag]);
+
+  // Active Bag Object
+  const currentBagObj = useMemo(() => {
+    if (!selectedBag) return null;
+    const clean = selectedBag.split('(')[0].trim().toLowerCase();
+    return bags.find(b =>
+      b.bag_number.trim().toLowerCase() === clean ||
+      b.bag_number.trim().toLowerCase() === selectedBag.trim().toLowerCase() ||
+      String(b.id) === clean ||
+      String(b.id) === selectedBag.trim()
+    ) || null;
+  }, [selectedBag, bags]);
+
+  // Available Lots: DIRECTLY derived from activeBagObj and lots with fallback to getLotsForBag
   const availableLots = useMemo(() => {
     if (!selectedBag) return [];
-    return getLotsForBag(selectedBag);
-  }, [selectedBag, getLotsForBag]);
 
-  // Selected Bag & Lot Objects
-  const currentBagObj = bags.find(b => b.bag_number.toLowerCase().trim() === selectedBag.toLowerCase().trim());
-  const currentLotObj = availableLots.find(l => l.lot_name.toLowerCase().trim() === selectedLot.toLowerCase().trim());
+    // First attempt: direct lookup via activeBagObj and lots state
+    if (currentBagObj) {
+      const bagIdStr = String(currentBagObj.id);
+      const bagNoClean = currentBagObj.bag_number.trim().toLowerCase();
+      const matchedLots = lots.filter(l => {
+        if (l.bag_id === currentBagObj.id) return true;
+        if (String(l.bag_id) === bagIdStr) return true;
+        if ((l as any).bag_number && String((l as any).bag_number).trim().toLowerCase() === bagNoClean) return true;
+        return false;
+      });
+
+      if (matchedLots.length > 0) {
+        return matchedLots.map(l => {
+          const lotRolls = rolls.filter(r =>
+            (r.bag_number?.trim().toLowerCase() === bagNoClean || r.bag_number?.trim().toLowerCase() === selectedBag.trim().toLowerCase()) &&
+            r.lot_name?.trim().toLowerCase() === l.lot_name.trim().toLowerCase()
+          );
+          const lastRollWithBarcode = lotRolls.find(r => r.barcode_used);
+          const mAssigned = lastRollWithBarcode ? machineAssignments.find(m => m.unique_code === lastRollWithBarcode.barcode_used) : null;
+          return {
+            id: l.id,
+            bag_id: l.bag_id,
+            lot_name: l.lot_name,
+            needles: l.needles || '24N',
+            fabric_weight: Number(l.fabric_weight ?? l.rem_weight ?? 0),
+            rem_weight: Number(l.fabric_weight ?? l.rem_weight ?? 0),
+            plan_weight: Number(l.plan_weight ?? 0),
+            barcode: lastRollWithBarcode?.barcode_used || null,
+            machine_no: mAssigned?.machine_no || null,
+            roll_count: lotRolls.length
+          };
+        });
+      }
+    }
+
+    // Fallback: call helper from AppContext
+    return getLotsForBag(selectedBag);
+  }, [currentBagObj, lots, rolls, machineAssignments, selectedBag, getLotsForBag]);
+
+  // Effect 3: Auto-select or maintain Lot when availableLots changes
+  useEffect(() => {
+    if (availableLots.length > 0) {
+      const exists = availableLots.some(l => l.lot_name.toLowerCase().trim() === selectedLot.toLowerCase().trim());
+      if (!exists) {
+        setSelectedLot(availableLots[0].lot_name);
+      }
+    } else {
+      setSelectedLot('');
+    }
+  }, [availableLots, selectedLot]);
+
+  // Current Lot Object
+  const currentLotObj = useMemo(() => {
+    if (!selectedLot) return null;
+    return availableLots.find(l => l.lot_name.toLowerCase().trim() === selectedLot.toLowerCase().trim()) || null;
+  }, [availableLots, selectedLot]);
 
   // Feeded Rolls for the selected Lot
   const lotFeededRolls = useMemo(() => {
     if (!woInput || !selectedBag || !selectedLot) return [];
-    return rolls.filter(r =>
-      r.work_order.toLowerCase().trim() === woInput.toLowerCase().trim() &&
-      r.bag_number.toLowerCase().trim() === selectedBag.toLowerCase().trim() &&
-      r.lot_name.toLowerCase().trim() === selectedLot.toLowerCase().trim()
-    );
-  }, [rolls, woInput, selectedBag, selectedLot]);
+    const cleanWo = woInput.trim().toLowerCase();
+    const cleanBag = selectedBag.trim().toLowerCase();
+    const cleanLot = selectedLot.trim().toLowerCase();
 
-  // Latest Roll info in this lot (for 1-line dark summary strip)
+    return rolls.filter(r =>
+      r.work_order.toLowerCase().trim() === cleanWo &&
+      (r.bag_number.toLowerCase().trim() === cleanBag || (currentBagObj && r.bag_number.toLowerCase().trim() === currentBagObj.bag_number.toLowerCase().trim())) &&
+      r.lot_name.toLowerCase().trim() === cleanLot
+    );
+  }, [rolls, woInput, selectedBag, selectedLot, currentBagObj]);
+
+  // Latest Roll info in this lot (for 1-line metallic summary strip)
   const latestRoll = lotFeededRolls.length > 0 ? lotFeededRolls[lotFeededRolls.length - 1] : null;
 
   // Auto sequential next roll number
@@ -171,101 +261,23 @@ export const RollEntryView: React.FC = () => {
     }
   }, [rollNoInput, lotFeededRolls]);
 
-  // Trigger Full Cascade when Work Order changes (via Enter or select or blur)
-  const triggerWoCascade = (woValue: string) => {
-    const trimmed = woValue.trim();
-    if (!trimmed) return;
-    setWoInput(trimmed);
-
-    const cleanWo = trimmed.toLowerCase().split('/').pop()?.trim() || trimmed.toLowerCase();
-    const woObj = workOrders.find(w =>
-      w.work_order.toLowerCase().trim() === cleanWo ||
-      w.work_order.toLowerCase().trim() === trimmed.toLowerCase() ||
-      String(w.id) === cleanWo
-    );
-
-    const pList = plans.filter(p => {
-      if (woObj && p.work_order_id === woObj.id) return true;
-      if (String(p.work_order_id) === String(woObj?.id)) return true;
-      if (String(p.work_order_id).toLowerCase() === cleanWo) return true;
-      if ((p as any).work_order && (p as any).work_order.toLowerCase().trim() === cleanWo) return true;
-      if (p.plan_id.toLowerCase().includes(cleanWo.replace(/[^a-z0-9]/g, ''))) return true;
-      return false;
-    });
-
-    if (pList.length > 0) {
-      const firstPlan = pList[0].plan_id;
-      setSelectedPlan(firstPlan);
-
-      // Bags for first plan
-      const bList = bags.filter(b => (b.plan_id === pList[0].id || String(b.plan_id) === String(pList[0].id)));
-      if (bList.length > 0) {
-        const firstBag = bList[0].bag_number;
-        setSelectedBag(firstBag);
-
-        // Lots for first bag
-        const lList = getLotsForBag(firstBag);
-        if (lList.length > 0) {
-          setSelectedLot(lList[0].lot_name);
-        } else {
-          setSelectedLot('');
-        }
-      } else {
-        setSelectedBag('');
-        setSelectedLot('');
-      }
-    } else {
-      setSelectedPlan('');
-      setSelectedBag('');
-      setSelectedLot('');
-    }
-  };
-
-  // When user presses Enter in Work Order box
+  // When user presses Enter or changes Work Order
   const handleWoKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      triggerWoCascade(woInput);
       planSelectRef.current?.focus();
     }
-  };
-
-  const handleWoBlur = () => {
-    triggerWoCascade(woInput);
   };
 
   // Plan Selection handler
   const handlePlanChange = (planId: string) => {
     setSelectedPlan(planId);
-    const planObj = plans.find(p => p.plan_id.toLowerCase().trim() === planId.toLowerCase().trim());
-    if (planObj) {
-      const bList = bags.filter(b => b.plan_id === planObj.id || String(b.plan_id) === String(planObj.id));
-      if (bList.length > 0) {
-        const firstBag = bList[0].bag_number;
-        setSelectedBag(firstBag);
-        const lList = getLotsForBag(firstBag);
-        if (lList.length > 0) {
-          setSelectedLot(lList[0].lot_name);
-        } else {
-          setSelectedLot('');
-        }
-      } else {
-        setSelectedBag('');
-        setSelectedLot('');
-      }
-    }
     bagSelectRef.current?.focus();
   };
 
   // Bag Selection handler
   const handleBagChange = (bagNo: string) => {
     setSelectedBag(bagNo);
-    const lList = getLotsForBag(bagNo);
-    if (lList.length > 0) {
-      setSelectedLot(lList[0].lot_name);
-    } else {
-      setSelectedLot('');
-    }
     lotSelectRef.current?.focus();
   };
 
@@ -375,76 +387,97 @@ export const RollEntryView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-5 font-sans">
-      {/* Top Header Bar */}
-      <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <ScrollText className="w-5 h-5 text-emerald-600" />
-            <h1 className="text-base sm:text-lg font-bold text-slate-900">
-              Fabric Roll Feeding Station (/roll-entry)
-            </h1>
+    <div className="space-y-4 font-sans text-slate-800">
+      
+      {/* Top Header Bar - Java Oracle ERP Silver Metallic */}
+      <div className="p-3.5 sm:p-4 rounded-xl border border-slate-400/80 bg-gradient-to-b from-slate-100 via-slate-200 to-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_2px_4px_rgba(0,0,0,0.08)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-b from-slate-200 to-slate-400 border border-slate-500 flex items-center justify-center text-slate-800 shadow-inner">
+            <ScrollText className="w-4 h-4 text-blue-900" />
           </div>
-          <p className="text-xs text-slate-500 mt-1">
-            Cascading Work Order &rarr; Plan &rarr; Bag &rarr; Lot &rarr; 5-Digit Machine Barcode with instant sticker &amp; merge support.
-          </p>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-blue-100 text-blue-900 border border-blue-300">
+                Oracle Form TX-301
+              </span>
+              <h1 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight">
+                Fabric Roll Feeding Station (/roll-entry)
+              </h1>
+            </div>
+            <p className="text-[11px] text-slate-600 font-medium">
+              Enterprise Work Order &rarr; Plan &rarr; Bag &rarr; Lot &rarr; Machine Verification with instant 5-row barcode thermal sticker.
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Filter Toggle: Complete Series vs All */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Filter Toggle: Complete Series vs All Work Orders */}
           <button
             type="button"
             onClick={() => setCompleteSeriesOnly(prev => !prev)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border flex items-center gap-1.5 transition-colors cursor-pointer ${
+            className={`px-3 py-1.5 rounded text-xs font-bold border transition-all cursor-pointer shadow-xs ${
               completeSeriesOnly
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+                ? 'bg-gradient-to-b from-blue-700 to-blue-900 text-white border-blue-950 shadow-inner'
+                : 'bg-gradient-to-b from-slate-100 to-slate-300 hover:from-white hover:to-slate-200 text-slate-800 border-slate-400'
             }`}
             title="Toggle Complete Series Filter"
           >
-            <Filter className="w-3.5 h-3.5" />
-            <span>{completeSeriesOnly ? 'Complete Series Only' : 'All PPC Work Orders'}</span>
+            <span className="flex items-center gap-1.5">
+              <Filter className="w-3.5 h-3.5" />
+              <span>{completeSeriesOnly ? 'Complete Series Only' : 'All PPC Work Orders'}</span>
+            </span>
           </button>
 
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-800 text-xs font-semibold rounded-full border border-emerald-200">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            Auto-Cascading Active
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gradient-to-b from-slate-100 to-slate-200 text-slate-800 text-[11px] font-bold rounded border border-slate-400 shadow-xs">
+            <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
+            Reactive Cascade Active
           </span>
         </div>
       </div>
 
       {/* Main 2-Column Responsive Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
 
         {/* ================= LEFT SECTION: FEED FORM & CONTROLS ================= */}
         <div className="lg:col-span-7 space-y-4">
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
+          <div className="rounded-xl border border-slate-400/80 bg-gradient-to-b from-slate-100 via-slate-200 to-slate-100 p-4 sm:p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_2px_4px_rgba(0,0,0,0.06)] space-y-4">
             
             {/* Section Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-                <Layers className="w-4 h-4 text-emerald-600" />
-                Roll Feed Form
+            <div className="flex items-center justify-between pb-2.5 border-b border-slate-300">
+              <h2 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                <Layers className="w-4 h-4 text-blue-900" />
+                Roll Feed Entry Form
               </h2>
-              <span className={`text-[11px] font-medium px-2.5 py-0.5 rounded-full ${
-                availablePlans.length > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
-              }`}>
-                {availablePlans.length > 0 ? `${availablePlans.length} Plan(s) Loaded` : 'Type WO & Press Enter'}
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className={`text-[11px] font-bold px-2 py-0.5 rounded border ${
+                  availablePlans.length > 0
+                    ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                    : 'bg-amber-100 text-amber-900 border-amber-300'
+                }`}>
+                  {availablePlans.length > 0 ? `${availablePlans.length} Plan(s) Loaded` : 'No Plans Found'}
+                </span>
+                <span className={`text-[11px] font-bold px-2 py-0.5 rounded border ${
+                  availableLots.length > 0
+                    ? 'bg-blue-100 text-blue-900 border-blue-300'
+                    : 'bg-slate-200 text-slate-600 border-slate-300'
+                }`}>
+                  {availableLots.length} Lot(s) Ready
+                </span>
+              </div>
             </div>
 
             <form onSubmit={handleFeedRoll} className="space-y-4">
               
               {/* PEHLI ROW: 4 Cascading Dropdowns/Inputs in One Row */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5">
                 
                 {/* 1. Work Order Box (Enter or Select) */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-[11px] font-bold uppercase text-slate-700">
-                      1. Work Order <span className="text-rose-500">*</span>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[11px] font-black uppercase text-slate-800">
+                      1. Work Order <span className="text-rose-600">*</span>
                     </label>
-                    <span className="text-[9px] text-slate-400 font-mono">Enter &crarr;</span>
+                    <span className="text-[9px] text-slate-500 font-mono">Enter &crarr;</span>
                   </div>
                   <input
                     type="text"
@@ -452,9 +485,8 @@ export const RollEntryView: React.FC = () => {
                     value={woInput}
                     onChange={e => setWoInput(e.target.value)}
                     onKeyDown={handleWoKeyDown}
-                    onBlur={handleWoBlur}
-                    placeholder="Type WO & press Enter..."
-                    className="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                    placeholder="Enter or select WO..."
+                    className="w-full px-2.5 py-1.5 border-2 border-slate-400 rounded text-xs font-mono font-bold uppercase bg-white text-slate-900 shadow-inner focus:border-blue-700 focus:ring-1 focus:ring-blue-700 focus:outline-hidden"
                   />
                   <datalist id="wo_datalist">
                     {displayedWorkOrders.map(w => (
@@ -466,12 +498,12 @@ export const RollEntryView: React.FC = () => {
                 </div>
 
                 {/* 2. Plan IDs Dropdown */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-[11px] font-bold uppercase text-slate-700">
-                      2. Plan ID <span className="text-rose-500">*</span>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[11px] font-black uppercase text-slate-800">
+                      2. Plan ID <span className="text-rose-600">*</span>
                     </label>
-                    <span className="text-[9px] text-slate-400 font-mono">
+                    <span className="text-[9px] text-blue-900 font-mono font-bold">
                       {availablePlans.length} plan(s)
                     </span>
                   </div>
@@ -480,7 +512,7 @@ export const RollEntryView: React.FC = () => {
                     value={selectedPlan}
                     disabled={availablePlans.length === 0}
                     onChange={e => handlePlanChange(e.target.value)}
-                    className="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                    className="w-full px-2.5 py-1.5 border-2 border-slate-400 rounded text-xs font-mono font-bold bg-white text-slate-900 disabled:bg-slate-200 disabled:text-slate-500 shadow-inner focus:border-blue-700 focus:ring-1 focus:ring-blue-700 focus:outline-hidden cursor-pointer"
                   >
                     <option value="">{availablePlans.length === 0 ? '-- No Plans for WO --' : '-- Choose Plan --'}</option>
                     {availablePlans.map(p => (
@@ -492,12 +524,12 @@ export const RollEntryView: React.FC = () => {
                 </div>
 
                 {/* 3. Bag / Badge Dropdown */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-[11px] font-bold uppercase text-slate-700">
-                      3. Bag / Badge <span className="text-rose-500">*</span>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[11px] font-black uppercase text-slate-800">
+                      3. Bag / Badge <span className="text-rose-600">*</span>
                     </label>
-                    <span className="text-[9px] text-slate-400 font-mono">
+                    <span className="text-[9px] text-blue-900 font-mono font-bold">
                       {availableBags.length} bag(s)
                     </span>
                   </div>
@@ -506,7 +538,7 @@ export const RollEntryView: React.FC = () => {
                     value={selectedBag}
                     disabled={availableBags.length === 0}
                     onChange={e => handleBagChange(e.target.value)}
-                    className="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                    className="w-full px-2.5 py-1.5 border-2 border-slate-400 rounded text-xs font-mono font-bold bg-white text-slate-900 disabled:bg-slate-200 disabled:text-slate-500 shadow-inner focus:border-blue-700 focus:ring-1 focus:ring-blue-700 focus:outline-hidden cursor-pointer"
                   >
                     <option value="">{availableBags.length === 0 ? '-- No Bags in Plan --' : '-- Choose Bag --'}</option>
                     {availableBags.map(b => (
@@ -518,12 +550,12 @@ export const RollEntryView: React.FC = () => {
                 </div>
 
                 {/* 4. Lot Dropdown */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-[11px] font-bold uppercase text-slate-700">
-                      4. Target Lot <span className="text-rose-500">*</span>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[11px] font-black uppercase text-slate-800">
+                      4. Target Lot <span className="text-rose-600">*</span>
                     </label>
-                    <span className="text-[9px] text-slate-400 font-mono">
+                    <span className="text-[9px] text-emerald-800 font-mono font-bold">
                       {availableLots.length} lot(s)
                     </span>
                   </div>
@@ -532,7 +564,7 @@ export const RollEntryView: React.FC = () => {
                     value={selectedLot}
                     disabled={availableLots.length === 0}
                     onChange={e => handleLotChange(e.target.value)}
-                    className="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                    className="w-full px-2.5 py-1.5 border-2 border-slate-400 rounded text-xs font-mono font-bold bg-white text-slate-900 disabled:bg-slate-200 disabled:text-slate-500 shadow-inner focus:border-blue-700 focus:ring-1 focus:ring-blue-700 focus:outline-hidden cursor-pointer"
                   >
                     <option value="">{availableLots.length === 0 ? '-- No Lots in Bag --' : '-- Choose Lot --'}</option>
                     {availableLots.map(lot => {
@@ -548,18 +580,18 @@ export const RollEntryView: React.FC = () => {
               </div>
 
               {/* SUMMARY STRIP IN ONE LINE (Already Feed Barcode, Job/WO, Shade, Machine) */}
-              {latestRoll && (
-                <div className="p-3 bg-slate-900 text-white rounded-xl text-xs shadow-inner animate-in fade-in duration-200">
-                  <div className="flex flex-wrap items-center justify-between gap-2.5">
+              {latestRoll ? (
+                <div className="p-2.5 bg-gradient-to-r from-slate-800 via-slate-700 to-slate-800 text-white rounded border border-slate-600 shadow-md animate-in fade-in duration-200">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[10px] text-slate-400 uppercase font-semibold">Already Feed Barcode:</span>
-                      <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 font-mono font-bold rounded border border-emerald-500/30">
+                      <span className="text-[10px] text-slate-300 uppercase font-bold tracking-wide">Already Feed Barcode:</span>
+                      <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 font-mono font-bold rounded border border-emerald-500/40 text-xs">
                         {latestRoll.roll_barcode}
                       </span>
                       <button
                         type="button"
                         onClick={handleCopyStripBarcode}
-                        className="px-2 py-0.5 text-[10px] bg-white/10 hover:bg-white/20 text-white rounded transition-colors flex items-center gap-1 cursor-pointer"
+                        className="px-2 py-0.5 text-[10px] bg-slate-600 hover:bg-slate-500 text-white rounded transition-colors flex items-center gap-1 cursor-pointer font-bold border border-slate-500 shadow-xs"
                         title="Copy Roll Barcode"
                       >
                         {copiedStrip ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
@@ -568,38 +600,47 @@ export const RollEntryView: React.FC = () => {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
-                      <div className="px-2 py-0.5 bg-slate-800 rounded border border-slate-700">
+                      <div className="px-2 py-0.5 bg-slate-900/80 rounded border border-slate-600">
                         <span className="text-slate-400 text-[10px]">Job/WO: </span>
                         <strong className="text-white">{`Job-1/${woInput}`}</strong>
                       </div>
-                      <div className="px-2 py-0.5 bg-slate-800 rounded border border-slate-700">
+                      <div className="px-2 py-0.5 bg-slate-900/80 rounded border border-slate-600">
                         <span className="text-slate-400 text-[10px]">Shade: </span>
-                        <strong className="text-white">{currentBagObj?.shade || '--'}</strong>
+                        <strong className="text-amber-300">{currentBagObj?.shade || '--'}</strong>
                       </div>
-                      <div className="px-2 py-0.5 bg-slate-800 rounded border border-slate-700">
+                      <div className="px-2 py-0.5 bg-slate-900/80 rounded border border-slate-600">
                         <span className="text-slate-400 text-[10px]">Machine: </span>
                         <strong className="text-emerald-400">{latestRoll.machine_no || 'M-01'}</strong>
                       </div>
-                      <div className="px-2 py-0.5 bg-slate-800 rounded border border-slate-700">
+                      <div className="px-2 py-0.5 bg-slate-900/80 rounded border border-slate-600">
                         <span className="text-slate-400 text-[10px]">Needles: </span>
                         <strong className="text-white">{currentLotObj?.needles || '24N'}</strong>
                       </div>
                     </div>
                   </div>
                 </div>
+              ) : (
+                <div className="p-2 bg-gradient-to-r from-slate-200 to-slate-300 text-slate-700 rounded border border-slate-400 text-xs flex items-center justify-between font-mono">
+                  <span className="text-[11px] font-semibold text-slate-600">
+                    Strip Summary: Ready to feed first roll for {selectedLot || 'selected lot'}.
+                  </span>
+                  <span className="text-[10px] bg-slate-100 text-slate-800 px-2 py-0.5 rounded border border-slate-300 font-bold">
+                    Needles: {currentLotObj?.needles || '24N'} | Shade: {currentBagObj?.shade || '--'}
+                  </span>
+                </div>
               )}
 
               {/* NEXT ROW: Roll Number, Roll Weight, Tube No, Machine Barcode, Submit Button */}
-              <div className="pt-2 border-t border-slate-100">
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 items-end">
+              <div className="pt-2.5 border-t border-slate-300">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2.5 items-end">
                   
                   {/* Roll Number Box */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-[11px] font-bold uppercase text-slate-700">
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-[11px] font-black uppercase text-slate-800">
                         Roll Number
                       </label>
-                      <span className="text-[9px] text-emerald-600 font-mono font-semibold">
+                      <span className="text-[9px] text-blue-900 font-mono font-bold">
                         Auto: 1, 2, 3..
                       </span>
                     </div>
@@ -609,14 +650,14 @@ export const RollEntryView: React.FC = () => {
                       value={rollNoInput}
                       onChange={e => setRollNoInput(e.target.value)}
                       placeholder="Auto (1, 2..)"
-                      className="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                      className="w-full px-2.5 py-1.5 border-2 border-slate-400 rounded text-xs font-mono font-bold text-slate-900 bg-white shadow-inner focus:border-blue-700 focus:ring-1 focus:ring-blue-700 focus:outline-hidden"
                     />
                   </div>
 
                   {/* Roll Weight Box */}
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
-                      Roll Weight (KG) <span className="text-rose-500">*</span>
+                  <div className="space-y-1">
+                    <label className="block text-[11px] font-black uppercase text-slate-800">
+                      Roll Weight (KG) <span className="text-rose-600">*</span>
                     </label>
                     <input
                       ref={weightInputRef}
@@ -628,13 +669,13 @@ export const RollEntryView: React.FC = () => {
                       value={weightInput}
                       onChange={e => setWeightInput(e.target.value)}
                       placeholder="e.g. 22.50"
-                      className="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden bg-emerald-50/20"
+                      className="w-full px-2.5 py-1.5 border-2 border-slate-400 rounded text-xs font-mono font-bold text-slate-900 bg-emerald-50/50 shadow-inner focus:border-emerald-700 focus:ring-1 focus:ring-emerald-700 focus:outline-hidden"
                     />
                   </div>
 
                   {/* Tube Box */}
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase text-slate-700 mb-1">
+                  <div className="space-y-1">
+                    <label className="block text-[11px] font-black uppercase text-slate-800">
                       Tube No
                     </label>
                     <input
@@ -642,17 +683,17 @@ export const RollEntryView: React.FC = () => {
                       value={tubeInput}
                       onChange={e => setTubeInput(e.target.value)}
                       placeholder="T-101"
-                      className="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                      className="w-full px-2.5 py-1.5 border-2 border-slate-400 rounded text-xs font-mono uppercase bg-white shadow-inner focus:border-blue-700 focus:ring-1 focus:ring-blue-700 focus:outline-hidden"
                     />
                   </div>
 
                   {/* Machine Sign Barcode (5-Digit) Box */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-[11px] font-bold uppercase text-slate-700">
-                        Machine Barcode <span className="text-rose-500">*</span>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-[11px] font-black uppercase text-slate-800">
+                        Machine Barcode <span className="text-rose-600">*</span>
                       </label>
-                      <span className="text-[9px] text-slate-400 font-mono">5-Digits</span>
+                      <span className="text-[9px] text-slate-600 font-mono font-bold">5-Digits</span>
                     </div>
                     <input
                       type="text"
@@ -661,15 +702,15 @@ export const RollEntryView: React.FC = () => {
                       value={machineBarcodeInput}
                       onChange={e => setMachineBarcodeInput(e.target.value.replace(/\D/g, ''))}
                       placeholder="e.g. 54219"
-                      className="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold tracking-widest uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-hidden bg-emerald-50/40 text-emerald-950"
+                      className="w-full px-2.5 py-1.5 border-2 border-slate-400 rounded text-xs font-mono font-bold tracking-widest uppercase bg-amber-50/60 text-slate-900 shadow-inner focus:border-blue-700 focus:ring-1 focus:ring-blue-700 focus:outline-hidden"
                     />
                   </div>
 
-                  {/* Submit Button ("Feed Roll") */}
+                  {/* Submit Button ("Feed Roll") - Java Oracle ERP Style */}
                   <div>
                     <button
                       type="submit"
-                      className="w-full px-3 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="w-full py-2 px-3 bg-gradient-to-b from-emerald-600 via-emerald-700 to-emerald-800 hover:from-emerald-500 hover:to-emerald-700 text-white rounded text-xs font-black uppercase tracking-wider transition-all border border-emerald-900 shadow-sm flex items-center justify-center gap-1.5 cursor-pointer active:shadow-inner"
                     >
                       <Printer className="w-4 h-4" />
                       <span>Feed Roll</span>
@@ -679,8 +720,8 @@ export const RollEntryView: React.FC = () => {
 
                 {/* Merge Notification Notice */}
                 {isMergedDetected && (
-                  <div className="mt-2.5 p-2.5 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-900 flex items-center gap-2 animate-in fade-in duration-150">
-                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <div className="mt-2.5 p-2.5 bg-gradient-to-r from-amber-100 to-amber-200 border border-amber-400 rounded text-xs text-amber-950 flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
+                    <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
                     <span>
                       <strong>Notice:</strong> Roll #{rollNoInput} already exists in this Lot. Submitting will <strong>merge +{weightInput} KG</strong> into the existing roll!
                     </span>
@@ -689,30 +730,32 @@ export const RollEntryView: React.FC = () => {
 
                 {/* Live Machine Barcode Verification Status */}
                 {machineBarcodeInput.length === 5 && (
-                  <div className={`mt-3 p-3 rounded-xl border text-xs flex items-center justify-between gap-2 ${
-                    matchedMachine ? 'bg-emerald-50/60 border-emerald-200' : 'bg-rose-50 border-rose-200'
+                  <div className={`mt-2.5 p-2.5 rounded border text-xs flex items-center justify-between gap-2 ${
+                    matchedMachine
+                      ? 'bg-gradient-to-r from-emerald-100 to-emerald-200 border-emerald-400 text-emerald-950'
+                      : 'bg-gradient-to-r from-rose-100 to-rose-200 border-rose-400 text-rose-950'
                   }`}>
                     {matchedMachine ? (
                       <>
                         <div className="flex items-center gap-3">
-                          <span className="px-2 py-0.5 rounded bg-slate-900 text-white font-mono text-[11px] font-bold">
+                          <span className="px-2 py-0.5 rounded bg-slate-800 text-white font-mono text-[11px] font-bold border border-slate-600">
                             {matchedMachine.machine_no}
                           </span>
-                          <span className="text-slate-700 font-mono text-[11px]">
+                          <span className="font-mono text-[11px]">
                             Needles: <strong>{matchedMachine.needles}</strong> | Signed Job: <strong>{matchedMachine.job_full_text}</strong>
                           </span>
                         </div>
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 flex items-center gap-1">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-700 text-white flex items-center gap-1 border border-emerald-900">
                           <CheckCircle2 className="w-3.5 h-3.5" />
                           Machine Verified
                         </span>
                       </>
                     ) : (
                       <>
-                        <span className="text-rose-700 font-medium">
+                        <span className="font-semibold text-rose-900">
                           Barcode '{machineBarcodeInput}' not signed in system! Please sign machine first in /machine-sign.
                         </span>
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-100 text-rose-800">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-rose-700 text-white border border-rose-900">
                           Not Signed
                         </span>
                       </>
@@ -728,35 +771,35 @@ export const RollEntryView: React.FC = () => {
         <div className="lg:col-span-5 space-y-4">
           
           {/* Selected Lot Details Card */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-                <Info className="w-4 h-4 text-emerald-600" />
+          <div className="rounded-xl border border-slate-400/80 bg-gradient-to-b from-slate-100 via-slate-200 to-slate-100 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_2px_4px_rgba(0,0,0,0.06)]">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-300">
+              <h2 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                <Info className="w-4 h-4 text-blue-900" />
                 Selected Lot Specifications
               </h2>
-              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-700">
+              <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-white text-slate-900 border border-slate-300 shadow-2xs">
                 {selectedLot || 'No Lot Selected'}
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 text-xs font-mono">
-              <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
-                <span className="text-[10px] text-slate-400 uppercase block">Lot Needles</span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2.5 text-xs font-mono">
+              <div className="p-2 bg-white rounded border border-slate-300 shadow-2xs">
+                <span className="text-[10px] text-slate-500 uppercase font-bold block">Lot Needles</span>
                 <strong className="text-slate-900 text-sm">{currentLotObj?.needles || '--'}</strong>
               </div>
-              <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
-                <span className="text-[10px] text-slate-400 uppercase block">Bag Shade</span>
+              <div className="p-2 bg-white rounded border border-slate-300 shadow-2xs">
+                <span className="text-[10px] text-slate-500 uppercase font-bold block">Bag Shade</span>
                 <strong className="text-slate-900 truncate block text-sm">{currentBagObj?.shade || '--'}</strong>
               </div>
-              <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
-                <span className="text-[10px] text-slate-400 uppercase block">Total Feeded</span>
-                <strong className="text-emerald-700 text-sm">
+              <div className="p-2 bg-white rounded border border-slate-300 shadow-2xs">
+                <span className="text-[10px] text-slate-500 uppercase font-bold block">Total Feeded</span>
+                <strong className="text-emerald-800 text-sm">
                   {lotFeededRolls.reduce((sum, r) => sum + (Number(r?.weight) || 0), 0).toFixed(1)} KG
                 </strong>
               </div>
-              <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
-                <span className="text-[10px] text-slate-400 uppercase block">Rem Balance</span>
-                <strong className="text-slate-900 text-sm">
+              <div className="p-2 bg-white rounded border border-slate-300 shadow-2xs">
+                <span className="text-[10px] text-slate-500 uppercase font-bold block">Rem Balance</span>
+                <strong className="text-blue-900 text-sm">
                   {currentLotObj ? `${Number(currentLotObj.fabric_weight ?? currentLotObj.rem_weight ?? 0).toFixed(1)} KG` : '--'}
                 </strong>
               </div>
@@ -764,25 +807,25 @@ export const RollEntryView: React.FC = () => {
           </div>
 
           {/* Already Feeded Rolls in Selected Lot Table */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div className="rounded-xl border border-slate-400/80 bg-gradient-to-b from-slate-100 via-slate-200 to-slate-100 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_2px_4px_rgba(0,0,0,0.06)]">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-300">
               <div>
-                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-                  <Tag className="w-4 h-4 text-emerald-600" />
+                <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                  <Tag className="w-4 h-4 text-blue-900" />
                   Feeded Rolls in this Lot
                 </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5">
+                <p className="text-[11px] text-slate-600 mt-0.5">
                   Rolls registered for {selectedLot || 'selected lot'}
                 </p>
               </div>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700">
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-white text-slate-800 border border-slate-300 shadow-2xs">
                 {lotFeededRolls.length} Roll(s)
               </span>
             </div>
 
-            <div className="mt-3 overflow-x-auto max-h-[380px] overflow-y-auto">
+            <div className="mt-2.5 overflow-x-auto max-h-[380px] overflow-y-auto rounded border border-slate-300 bg-white">
               <table className="w-full text-left border-collapse text-xs">
-                <thead className="bg-slate-50 text-[10px] font-bold text-slate-500 uppercase sticky top-0 border-b border-slate-200">
+                <thead className="bg-gradient-to-b from-slate-300 to-slate-200 text-[10px] font-black text-slate-800 uppercase sticky top-0 border-b-2 border-slate-400 shadow-xs">
                   <tr>
                     <th className="p-2">Roll #</th>
                     <th className="p-2">Weight</th>
@@ -792,44 +835,44 @@ export const RollEntryView: React.FC = () => {
                     <th className="p-2 text-center">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 font-mono text-[11px]">
+                <tbody className="divide-y divide-slate-200 font-mono text-[11px]">
                   {lotFeededRolls.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="p-6 text-center text-slate-400 font-sans text-xs">
+                      <td colSpan={6} className="p-6 text-center text-slate-500 font-sans text-xs bg-slate-50">
                         Abhi is lot mein koi roll feed nahi hua. Upar form se feed karein.
                       </td>
                     </tr>
                   ) : (
                     lotFeededRolls.map(r => (
-                      <tr key={r.id} className="hover:bg-slate-50 transition-colors">
+                      <tr key={r.id} className="hover:bg-blue-50/60 transition-colors even:bg-slate-50/70">
                         <td className="p-2 font-bold text-slate-900 flex items-center gap-1.5">
                           <span>#{r.roll_no}</span>
                           {r.is_merged && (
-                            <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 text-[9px] font-sans font-bold">
+                            <span className="px-1.5 py-0.2 rounded bg-amber-200 text-amber-900 text-[9px] font-sans font-bold border border-amber-300">
                               Merged
                             </span>
                           )}
                         </td>
-                        <td className="p-2 font-black text-emerald-700">
+                        <td className="p-2 font-black text-emerald-800">
                           {(Number(r?.weight) || 0).toFixed(2)} KG
                         </td>
-                        <td className="p-2 text-slate-600">
+                        <td className="p-2 text-slate-700">
                           {r.tube_no || 'T-101'}
                         </td>
-                        <td className="p-2 text-slate-500 text-[10px]">
+                        <td className="p-2 text-slate-600 text-[10px]">
                           {r.created_at}
                         </td>
-                        <td className="p-2 text-slate-700">
+                        <td className="p-2 text-slate-800 font-bold">
                           {r.roll_barcode}
                         </td>
                         <td className="p-2 text-center">
                           <button
                             type="button"
                             onClick={() => handleReprintRoll(r)}
-                            className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded font-sans text-[10px] font-semibold flex items-center justify-center gap-1 mx-auto transition-colors cursor-pointer"
+                            className="px-2 py-0.5 bg-gradient-to-b from-slate-100 to-slate-200 hover:from-white hover:to-slate-100 text-slate-800 rounded font-sans text-[10px] font-bold flex items-center justify-center gap-1 mx-auto transition-colors cursor-pointer border border-slate-400 shadow-2xs"
                             title="Re-print Thermal Sticker"
                           >
-                            <Printer className="w-3 h-3 text-slate-600" />
+                            <Printer className="w-3 h-3 text-blue-900" />
                             <span>Sticker</span>
                           </button>
                         </td>
@@ -847,36 +890,36 @@ export const RollEntryView: React.FC = () => {
       {/* ================= SPECIFICATION MISMATCH ALERT POPUP MODAL ================= */}
       {mismatchError && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-          <div className="bg-white rounded-2xl max-w-lg w-full border-2 border-rose-500 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
-            <div className="bg-rose-600 p-4 text-white flex items-center justify-between">
+          <div className="bg-white rounded-xl max-w-lg w-full border-2 border-rose-600 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
+            <div className="bg-gradient-to-r from-rose-700 to-rose-900 p-3.5 text-white flex items-center justify-between border-b border-rose-950">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center text-lg font-bold">
-                  <AlertTriangle className="w-5 h-5 text-white" />
+                <div className="w-8 h-8 rounded bg-white/20 flex items-center justify-center text-lg font-bold">
+                  <AlertTriangle className="w-4 h-4 text-white" />
                 </div>
                 <div>
                   <h3 className="font-bold text-sm tracking-wide">{mismatchError.title}</h3>
-                  <p className="text-[11px] text-rose-100">Roll feed nahi ho sakta jab tak Machine Barcode match na ho</p>
+                  <p className="text-[11px] text-rose-200">Roll feed nahi ho sakta jab tak Machine Barcode match na ho</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setMismatchError(null)}
-                className="text-white/80 hover:text-white p-1 rounded-lg cursor-pointer"
+                className="text-white/80 hover:text-white p-1 rounded cursor-pointer"
               >
                 <XCircle className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-5 space-y-4 text-xs font-sans">
-              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 font-medium flex items-start gap-2.5">
+            <div className="p-4 space-y-3.5 text-xs font-sans">
+              <div className="p-3 bg-rose-50 border border-rose-300 rounded text-rose-900 font-medium flex items-start gap-2.5">
                 <AlertTriangle className="w-4 h-4 text-rose-600 mt-0.5 shrink-0" />
                 <div>{mismatchError.message}</div>
               </div>
 
               {mismatchError.machineSpec && mismatchError.lotSpec && (
                 <div className="grid grid-cols-2 gap-3 pt-1">
-                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                    <span className="font-bold uppercase tracking-wider text-[10px] text-slate-500 block mb-1">
+                  <div className="p-3 rounded bg-slate-100 border border-slate-300">
+                    <span className="font-bold uppercase tracking-wider text-[10px] text-slate-700 block mb-1">
                       Chuna Hua Lot Spec:
                     </span>
                     <div className="space-y-1 font-mono text-[11px]">
@@ -886,8 +929,8 @@ export const RollEntryView: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-200">
-                    <span className="font-bold uppercase tracking-wider text-[10px] text-rose-600 block mb-1">
+                  <div className="p-3 rounded bg-rose-50 border border-rose-300">
+                    <span className="font-bold uppercase tracking-wider text-[10px] text-rose-700 block mb-1">
                       Signed Machine Barcode ({mismatchError.machineSpec.unique_code}):
                     </span>
                     <div className="space-y-1 font-mono text-[11px]">
@@ -899,7 +942,7 @@ export const RollEntryView: React.FC = () => {
                 </div>
               )}
 
-              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 flex items-start gap-2">
+              <div className="p-2.5 bg-amber-50 rounded border border-amber-300 text-amber-900 flex items-start gap-2">
                 <Info className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
                 <span className="text-[11px]">
                   <strong>Hal (Solution):</strong> Agar machine par doosra shade ya needle lagi hai, pehle <strong>/machine-sign</strong> par jakar nayi machine sign in karein aur waha se hasil shuda 5-digit barcode enter karein.
@@ -907,11 +950,11 @@ export const RollEntryView: React.FC = () => {
               </div>
             </div>
 
-            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+            <div className="p-3 bg-slate-100 border-t border-slate-300 flex items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setMismatchError(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold cursor-pointer"
+                className="px-4 py-1.5 bg-gradient-to-b from-slate-700 to-slate-900 hover:from-slate-600 hover:to-slate-800 text-white rounded text-xs font-bold cursor-pointer border border-slate-950"
               >
                 Theek Hai / Samajh Gaya
               </button>

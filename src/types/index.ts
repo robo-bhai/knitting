@@ -75,8 +75,10 @@ export interface Lot {
   lot_name: string;
   fabric_length: number;
   fabric_weight: number; // Current remaining balance weight
+  rem_weight?: number;   // Alias for balance weight
   plan_weight: number;   // Stable initial planned target weight
   bag_weight: number;    // Total bag planned weight
+  bag_number?: string;
   needles: string;       // e.g. "24N", "28N"
   job_id: number;
   remarks: string;

@@ -43,7 +43,7 @@ const MainApp: React.FC = () => {
   // If user is not logged in, render the login page directly
   if (!currentUser && activeTab !== 'login') {
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-200 via-slate-300 to-slate-200 flex flex-col justify-center">
         <FlashMessageContainer />
         <LoginView onSuccess={() => setActiveTab('dashboard')} />
       </div>
@@ -53,7 +53,7 @@ const MainApp: React.FC = () => {
   // Primary Requested UI: Desktop-like Multi-Window MDI Environment
   if (isDesktopMode) {
     return (
-      <div className="h-screen w-screen overflow-hidden">
+      <div className="h-screen w-screen overflow-hidden bg-slate-300">
         <FlashMessageContainer />
         <DesktopWindowManager onToggleClassicMode={() => setIsDesktopMode(false)} />
       </div>
@@ -62,7 +62,7 @@ const MainApp: React.FC = () => {
 
   // Classic Single-Page ERP View with Desktop Mode Switcher
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-800">
+    <div className="min-h-screen bg-slate-200 flex flex-col font-sans text-slate-800">
       <FlashMessageContainer />
 
       {/* Top Navbar */}

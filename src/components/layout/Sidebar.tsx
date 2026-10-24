@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import {
   LayoutDashboard, GitFork, QrCode, ScrollText, CheckSquare,
   Warehouse, Truck, Users, CalendarCheck, Wallet, Receipt,
-  Search, ShieldAlert, Cpu, FileSpreadsheet, Code2, Wrench, X
+  Search, ShieldAlert, Cpu, FileSpreadsheet, Code2, Wrench, X, Monitor
 } from 'lucide-react';
 
 interface Props {
@@ -58,33 +58,24 @@ export const Sidebar: React.FC<Props> = ({ activeTab, setActiveTab, isMobileOpen
       title: 'HUMAN RESOURCES (HR)',
       items: [
         ...(['admin', 'manager'].includes(role) ? [
-          { id: 'hr_staff', label: 'Staff Directory', icon: Users, route: '/hr/staff' }
-        ] : []),
-        ...(['admin', 'manager', 'incharge'].includes(role) ? [
-          { id: 'hr_attendance', label: 'Daily Attendance', icon: CalendarCheck, route: '/hr/attendance' }
-        ] : []),
-        ...(['admin', 'manager'].includes(role) ? [
-          { id: 'hr_ledger', label: 'Staff Financial Ledger', icon: Wallet, route: '/hr/ledger' }
-        ] : []),
-        ...(role === 'admin' ? [
-          { id: 'hr_payroll', label: 'Monthly Payroll', icon: Receipt, route: '/hr/payroll' }
-        ] : []),
-        { id: 'hr_search', label: 'Search Staff Profile', icon: Search, route: '/hr/search' },
+          { id: 'hr_staff', label: 'Staff Personnel Register', icon: Users, route: '/hr/staff' },
+          { id: 'hr_attendance', label: 'Daily Attendance', icon: CalendarCheck, route: '/hr/attendance' },
+          { id: 'hr_ledger', label: 'Staff Ledgers & Advances', icon: Wallet, route: '/hr/ledger' },
+          { id: 'hr_payroll', label: 'Monthly Payroll', icon: Receipt, route: '/hr/payroll' },
+        ] : [])
       ]
     },
     {
-      title: 'SYSTEM & CLOUD DATABASE',
+      title: 'SYSTEM & TOOLS',
       items: [
-        { id: 'mysql_setup', label: 'MySQL Migration & Cloud', icon: LayoutDashboard, route: 'MySQL Setup' },
-        { id: 'cloudflare_workflow', label: 'Cloudflare Tunnel (5h)', icon: Cpu, route: '.github/workflows' },
-        { id: 'aux_operations', label: 'Auxiliary Forms', icon: Wrench, route: '/downtime, /yarn' },
-        { id: 'jinja_templates', label: 'Flask Jinja2 Templates', icon: Code2, route: '/templates/*' },
+        { id: 'mysql_setup', label: 'Cloud MySQL Database', icon: Wrench, route: '/mysql-migration' },
+        { id: 'jinja_templates', label: 'Flask Jinja2 HTML Explorer', icon: Code2, route: '/templates-explorer' },
       ]
     }
   ];
 
-  const handleSelect = (id: string) => {
-    setActiveTab(id);
+  const handleSelect = (tabId: string) => {
+    setActiveTab(tabId);
     closeMobileSidebar();
   };
 
@@ -94,38 +85,41 @@ export const Sidebar: React.FC<Props> = ({ activeTab, setActiveTab, isMobileOpen
       {isMobileOpen && (
         <div
           onClick={closeMobileSidebar}
-          className="fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-xs lg:hidden"
+          className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-2xs lg:hidden"
         />
       )}
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed top-14 bottom-0 left-0 z-40 w-64 bg-slate-900 border-r border-slate-800 flex flex-col transition-transform duration-200 lg:translate-x-0 ${
+        className={`fixed top-13 bottom-0 left-0 z-40 w-64 bg-slate-200 border-r border-slate-300 flex flex-col transition-transform duration-200 shadow-sm lg:translate-x-0 ${
           isMobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="p-3 lg:hidden flex justify-between items-center border-b border-slate-800">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Navigation Menu</span>
-          <button onClick={closeMobileSidebar} className="p-1 text-slate-400 hover:text-white">
+        <div className="p-3 lg:hidden flex justify-between items-center border-b border-slate-300 bg-slate-300/60">
+          <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Navigation Menu</span>
+          <button onClick={closeMobileSidebar} className="p-1 text-slate-600 hover:text-slate-900 cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5 scrollbar-thin scrollbar-thumb-slate-800">
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-4">
           {onLaunchDesktopMode && (
-            <div className="pb-3 border-b border-slate-800">
+            <div className="mb-3">
               <button
-                onClick={onLaunchDesktopMode}
-                className="w-full p-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-left font-bold text-xs flex items-center justify-between shadow-md transition-all group"
+                onClick={() => {
+                  onLaunchDesktopMode();
+                  closeMobileSidebar();
+                }}
+                className="w-full p-2.5 bg-gradient-to-r from-blue-700 to-blue-800 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-between transition-all cursor-pointer border border-blue-900"
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-base">🖥️</span>
-                  <div>
+                  <Monitor className="w-4 h-4" />
+                  <div className="text-left">
                     <div>Desktop Workspace</div>
-                    <div className="text-[10px] text-emerald-100 font-normal">Side-by-side forms</div>
+                    <div className="text-[10px] text-blue-200 font-normal">Multi-Window Forms</div>
                   </div>
                 </div>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-700/80 uppercase font-mono">Multi</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900 uppercase font-mono font-bold">MDI</span>
               </button>
             </div>
           )}
@@ -133,11 +127,11 @@ export const Sidebar: React.FC<Props> = ({ activeTab, setActiveTab, isMobileOpen
           {navSections.map(section => {
             if (section.items.length === 0) return null;
             return (
-              <div key={section.title}>
-                <div className="px-2 mb-2 text-[10px] font-mono font-bold tracking-wider text-slate-400 uppercase">
+              <div key={section.title} className="space-y-1">
+                <div className="px-2 mb-1 text-[10px] font-mono font-bold tracking-wider text-slate-500 uppercase">
                   {section.title}
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   {section.items.map(item => {
                     const isActive = activeTab === item.id;
                     const Icon = item.icon;
@@ -145,17 +139,17 @@ export const Sidebar: React.FC<Props> = ({ activeTab, setActiveTab, isMobileOpen
                       <button
                         key={item.id}
                         onClick={() => handleSelect(item.id)}
-                        className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition-colors text-left ${
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-all text-left cursor-pointer ${
                           isActive
-                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold'
-                            : 'text-slate-300 hover:bg-slate-800/70 hover:text-white'
+                            ? 'bg-white text-blue-900 border border-slate-300 font-extrabold shadow-2xs'
+                            : 'text-slate-700 hover:bg-slate-100 hover:text-slate-950 font-medium'
                         }`}
                       >
                         <div className="flex items-center gap-2.5 truncate">
-                          <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-emerald-400' : 'text-slate-400'}`} />
+                          <Icon className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-blue-700' : 'text-slate-500'}`} />
                           <span className="truncate">{item.label}</span>
                         </div>
-                        <span className="text-[10px] font-mono text-slate-400 shrink-0 hidden sm:inline">
+                        <span className="text-[9px] font-mono text-slate-400 shrink-0 hidden sm:inline">
                           {item.route}
                         </span>
                       </button>
@@ -168,13 +162,13 @@ export const Sidebar: React.FC<Props> = ({ activeTab, setActiveTab, isMobileOpen
         </nav>
 
         {/* Footer Role Badge */}
-        <div className="p-3 border-t border-slate-800 bg-slate-950/60 text-xs">
+        <div className="p-3 border-t border-slate-300 bg-slate-300/60 text-xs">
           <div className="flex items-center justify-between">
             <div>
-              <span className="text-[10px] font-mono text-slate-400 uppercase block">Active Session</span>
-              <span className="text-xs font-semibold text-slate-200">{currentUser?.username || 'Guest'}</span>
+              <span className="text-[10px] font-mono text-slate-500 uppercase font-semibold block">Operator</span>
+              <span className="text-xs font-bold text-slate-900">{currentUser?.username || 'Guest'}</span>
             </div>
-            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-800 text-emerald-400 border border-slate-700">
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-white text-blue-800 border border-slate-300 shadow-2xs">
               {role}
             </span>
           </div>

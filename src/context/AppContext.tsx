@@ -1101,21 +1101,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const getLotsForBag = (bagNumber: string) => {
-    const bag = bags.find(b => b.bag_number.trim().toLowerCase() === bagNumber.trim().toLowerCase());
+    if (!bagNumber) return [];
+    const raw = String(bagNumber).trim();
+    const cleanBagNo = raw.split('(')[0].trim().toLowerCase();
+
+    // Match bag by exact number, trimmed number, without shade, or by ID
+    const bag = bags.find(b => {
+      const bNo = b.bag_number.trim().toLowerCase();
+      return bNo === cleanBagNo ||
+             bNo === raw.toLowerCase() ||
+             String(b.id) === cleanBagNo ||
+             String(b.id) === raw;
+    });
+
     if (!bag) return [];
+    const bagIdStr = String(bag.id);
+    const targetBagNo = bag.bag_number.trim().toLowerCase();
+
     return lots
-      .filter(l => l.bag_id === bag.id)
+      .filter(l => {
+        if (l.bag_id === bag.id) return true;
+        if (String(l.bag_id) === bagIdStr) return true;
+        if ((l as any).bag_number && String((l as any).bag_number).trim().toLowerCase() === targetBagNo) return true;
+        return false;
+      })
       .map(l => {
-        const lotRolls = rolls.filter(r => r.bag_number === bagNumber && r.lot_name === l.lot_name);
+        const lotRolls = rolls.filter(r =>
+          (r.bag_number?.trim().toLowerCase() === targetBagNo || r.bag_number?.trim().toLowerCase() === cleanBagNo) &&
+          r.lot_name?.trim().toLowerCase() === l.lot_name.trim().toLowerCase()
+        );
         const lastRollWithBarcode = lotRolls.find(r => r.barcode_used);
         const mAssigned = lastRollWithBarcode ? machineAssignments.find(m => m.unique_code === lastRollWithBarcode.barcode_used) : null;
         return {
           id: l.id,
           bag_id: l.bag_id,
           lot_name: l.lot_name,
-          needles: l.needles,
-          fabric_weight: Number(l.fabric_weight ?? 0),
-          rem_weight: Number(l.fabric_weight ?? 0),
+          needles: l.needles || '24N',
+          fabric_weight: Number(l.fabric_weight ?? l.rem_weight ?? 0),
+          rem_weight: Number(l.fabric_weight ?? l.rem_weight ?? 0),
           plan_weight: Number(l.plan_weight ?? 0),
           barcode: lastRollWithBarcode?.barcode_used || null,
           machine_no: mAssigned?.machine_no || null,

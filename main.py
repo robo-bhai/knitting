@@ -1349,6 +1349,7 @@ def api_lots(bag_number=None):
     con = db(); cur = con.cursor()
     data = []
     if bag_number:
+        clean_bag = bag_number.split('(')[0].strip()
         try:
             cur.execute("""
                 SELECT 
@@ -1359,15 +1360,17 @@ def api_lots(bag_number=None):
                     fr.barcode_used as barcode,
                     m.machine_no,
                     (SELECT COUNT(*) FROM fabric_rolls fr2 
-                     WHERE fr2.lot_name = l.lot_name AND fr2.bag_number = b.bag_number) as roll_count
+                     WHERE fr2.lot_name = l.lot_name AND (fr2.bag_number = b.bag_number OR fr2.bag_number = ?)) as roll_count
                 FROM lots l
                 JOIN bags b ON l.bag_id = b.id
-                LEFT JOIN fabric_rolls fr ON (fr.bag_number = b.bag_number AND fr.lot_name = l.lot_name)
+                LEFT JOIN fabric_rolls fr ON ((fr.bag_number = b.bag_number OR fr.bag_number = ?) AND fr.lot_name = l.lot_name)
                 LEFT JOIN machine_assignments m ON fr.barcode_used = m.unique_code
                 WHERE LOWER(TRIM(b.bag_number)) = LOWER(TRIM(?))
+                   OR LOWER(TRIM(b.bag_number)) = LOWER(TRIM(?))
+                   OR CAST(b.id AS CHAR) = ?
                 GROUP BY l.lot_name, fr.barcode_used, l.needles, l.fabric_weight, l.plan_weight, m.machine_no, b.bag_number
                 ORDER BY l.id ASC
-            """, (bag_number,))
+            """, (clean_bag, clean_bag, bag_number, clean_bag, clean_bag))
             rows = cur.fetchall()
             seen = set()
             for row in rows:

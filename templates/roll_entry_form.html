@@ -95,6 +95,47 @@
         </div>
       </div>
 
+      <!-- Summary Strip in One Line -->
+      <div id="already_feed_strip" class="p-3 bg-slate-900 text-white rounded-xl text-xs hidden shadow-inner transition-all">
+        <div class="flex flex-wrap items-center justify-between gap-2.5">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-[10px] text-slate-400 uppercase font-semibold">Already Feed Barcode:</span>
+            <span id="strip_feed_barcode" class="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 font-mono font-bold rounded border border-emerald-500/30">
+              R-??-??
+            </span>
+            <button 
+              type="button" 
+              id="copy_barcode_btn" 
+              onclick="copyStripBarcode()" 
+              class="px-2 py-0.5 text-[10px] bg-white/10 hover:bg-white/20 text-white rounded transition-colors flex items-center gap-1 cursor-pointer"
+              title="Copy Roll Barcode"
+            >
+              <i class="fa-solid fa-copy"></i>
+              <span id="copy_btn_text">Copy</span>
+            </button>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+            <div class="px-2 py-0.5 bg-slate-800 rounded border border-slate-700">
+              <span class="text-slate-400 text-[10px]">Job/WO:</span>
+              <strong id="strip_job_wo" class="text-white">--</strong>
+            </div>
+            <div class="px-2 py-0.5 bg-slate-800 rounded border border-slate-700">
+              <span class="text-slate-400 text-[10px]">Shade:</span>
+              <strong id="strip_shade" class="text-white">--</strong>
+            </div>
+            <div class="px-2 py-0.5 bg-slate-800 rounded border border-slate-700">
+              <span class="text-slate-400 text-[10px]">Machine:</span>
+              <strong id="strip_machine" class="text-emerald-400">--</strong>
+            </div>
+            <div class="px-2 py-0.5 bg-slate-800 rounded border border-slate-700">
+              <span class="text-slate-400 text-[10px]">Needles:</span>
+              <strong id="strip_needles" class="text-white">--</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 3. Machine Barcode (5-Digit) & Needles -->
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
@@ -153,8 +194,22 @@
         </div>
       </div>
 
-      <!-- 4. Weight & Tube -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <!-- 4. Roll Number, Weight & Tube -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-semibold text-slate-700">Roll Number</label>
+            <span id="form_roll_hint" class="text-[10px] text-emerald-600 font-mono font-semibold">Auto (1, 2..)</span>
+          </div>
+          <input 
+            type="number" 
+            name="roll_no" 
+            id="form_roll_no_input" 
+            min="1"
+            placeholder="Auto (1, 2..)" 
+            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+          >
+        </div>
         <div>
           <label class="block text-xs font-semibold text-slate-700 mb-1">
             Roll Weight (KG) <span class="text-rose-500">*</span>
@@ -168,7 +223,6 @@
             placeholder="22.50" 
             class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
           >
-          <p class="text-[10px] text-slate-500 mt-1">Net roll weight</p>
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-700 mb-1">Tube No</label>
@@ -179,8 +233,13 @@
             value="T-101" 
             class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-none"
           >
-          <p class="text-[10px] text-slate-500 mt-1">Paper tube number</p>
         </div>
+      </div>
+
+      <!-- Merge Notice in Form -->
+      <div id="form_merge_notice" class="p-2.5 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-900 hidden flex items-center gap-2">
+        <i class="fa-solid fa-code-merge text-amber-600 shrink-0"></i>
+        <span id="form_merge_notice_text">Notice: Roll number already exists. Submitting will merge the weight!</span>
       </div>
 
       <div class="flex items-center justify-between pt-4 border-t border-slate-100">
@@ -258,6 +317,116 @@
     </div>
   </div>
 </div>
+
+<!-- Instant Printable Thermal Sticker Modal -->
+<div id="thermal_sticker_modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 hidden">
+  <div class="bg-white rounded-2xl max-w-sm w-full border border-slate-300 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div class="bg-slate-900 text-white p-3.5 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <i class="fa-solid fa-tag text-emerald-400"></i>
+        <h3 class="font-bold text-xs uppercase tracking-wider">Thermal Roll Sticker</h3>
+      </div>
+      <button type="button" onclick="closeStickerModal()" class="text-white/70 hover:text-white text-base cursor-pointer">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+
+    <!-- Printable Sticker Content Area -->
+    <div class="p-4 bg-slate-100 flex flex-col items-center">
+      <div id="printable_sticker_card" class="w-full bg-white border-2 border-slate-900 rounded-lg p-3 text-slate-900 font-mono text-xs shadow-sm space-y-2">
+        <!-- ROW 1: Bag Number | Lot | Roll Number -->
+        <div class="grid grid-cols-3 border-b-2 border-slate-900 pb-1.5 text-center font-bold">
+          <div class="text-left">
+            <span class="text-[9px] text-slate-500 uppercase block font-sans">Bag No</span>
+            <span id="stk_bag">--</span>
+          </div>
+          <div>
+            <span class="text-[9px] text-slate-500 uppercase block font-sans">Lot</span>
+            <span id="stk_lot">--</span>
+          </div>
+          <div class="text-right">
+            <span class="text-[9px] text-slate-500 uppercase block font-sans">Roll #</span>
+            <span id="stk_roll_no" class="text-base font-black">--</span>
+          </div>
+        </div>
+
+        <!-- ROW 2: Job / Work Order | Needle -->
+        <div class="grid grid-cols-2 border-b-2 border-slate-900 pb-1.5 font-bold">
+          <div>
+            <span class="text-[9px] text-slate-500 uppercase block font-sans">Job / WO</span>
+            <span id="stk_job_wo">--</span>
+          </div>
+          <div class="text-right">
+            <span class="text-[9px] text-slate-500 uppercase block font-sans">Needle</span>
+            <span id="stk_needle">--</span>
+          </div>
+        </div>
+
+        <!-- ROW 3: Machine | Weight -->
+        <div class="grid grid-cols-2 border-b-2 border-slate-900 pb-1.5 font-bold">
+          <div>
+            <span class="text-[9px] text-slate-500 uppercase block font-sans">Machine</span>
+            <span id="stk_machine" class="text-emerald-700">--</span>
+          </div>
+          <div class="text-right">
+            <span class="text-[9px] text-slate-500 uppercase block font-sans">Net Weight</span>
+            <span id="stk_weight" class="text-sm font-black">-- KG</span>
+          </div>
+        </div>
+
+        <!-- ROW 4 & 5: Roll Barcode Text & Laser Scannable Barcode Bars -->
+        <div class="pt-1 flex flex-col items-center justify-center">
+          <svg id="stk_barcode_svg" class="w-full max-h-12"></svg>
+          <div id="stk_barcode_text" class="text-xs font-black tracking-widest font-mono mt-0.5">--</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Action Buttons -->
+    <div class="p-3 bg-white border-t border-slate-200 flex items-center justify-between gap-2">
+      <button 
+        type="button" 
+        onclick="closeStickerModal()" 
+        class="px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+      >
+        Close
+      </button>
+      <div class="flex items-center gap-2">
+        <button 
+          type="button" 
+          onclick="printThermalSticker()" 
+          class="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+        >
+          <i class="fa-solid fa-print"></i>
+          Print Sticker
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable_sticker_card, #printable_sticker_card * {
+    visibility: visible;
+  }
+  #printable_sticker_card {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 3.5in !important;
+    max-width: 100% !important;
+    border: 2px solid #000 !important;
+    padding: 8px !important;
+    font-size: 11px !important;
+    box-shadow: none !important;
+    background: #fff !important;
+  }
+}
+</style>
 {% endblock %}
 
 {% block scripts %}

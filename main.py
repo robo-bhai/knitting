@@ -64,10 +64,17 @@ class MySQLCursorWrapper:
 
     def fetchone(self):
         row = self._cur.fetchone()
+        if row is not None and not isinstance(row, dict) and hasattr(self._cur, 'description') and self._cur.description:
+            cols = [col[0] for col in self._cur.description]
+            return dict(zip(cols, row))
         return row
 
     def fetchall(self):
-        return self._cur.fetchall()
+        rows = self._cur.fetchall()
+        if rows and not isinstance(rows[0], dict) and hasattr(self._cur, 'description') and self._cur.description:
+            cols = [col[0] for col in self._cur.description]
+            return [dict(zip(cols, r)) for r in rows]
+        return rows
 
     @property
     def rowcount(self):
@@ -367,7 +374,9 @@ def repair_and_migrate_db():
         'fabric_rolls': [
             ('roll_barcode', f'{text_type}'),
             ('machine_no', f'{text_type}'),
-            ('barcode_used', f'{text_type}')
+            ('barcode_used', f'{text_type}'),
+            ('is_merged', 'INTEGER DEFAULT 0'),
+            ('merge_count', 'INTEGER DEFAULT 0')
         ],
         'quality_checks': [
             ('in_store', 'INTEGER DEFAULT 0'),
@@ -1107,10 +1116,11 @@ def delete_machine_sign(id):
 # ================= ROLL ENTRY & BARCODE SYSTEM =================
 def get_ready_work_orders(cur):
     """
-    Returns ONLY Work Orders whose entire series is complete:
-    Work Order -> Plan -> Bag (Badge) -> Lot AND Machine Sign (5-Digit Barcode).
+    Returns Work Orders from PPC so the user can easily select any active Work Order.
+    Prioritizes complete-series work orders (WO -> Plan -> Bag -> Lot -> Machine Assignment).
     """
     try:
+        # First priority: Complete series
         cur.execute("""
             SELECT DISTINCT wo.work_order
             FROM work_orders wo
@@ -1121,12 +1131,37 @@ def get_ready_work_orders(cur):
                 (m.work_order IS NOT NULL AND LOWER(TRIM(m.work_order)) = LOWER(TRIM(wo.work_order)))
                 OR (m.job_full_text LIKE CONCAT('%', wo.work_order, '%'))
             )
-            WHERE m.unique_code IS NOT NULL 
-              AND LENGTH(TRIM(m.unique_code)) = 5
+            WHERE m.unique_code IS NOT NULL AND LENGTH(TRIM(m.unique_code)) = 5
             ORDER BY wo.work_order DESC
         """)
-        rows = cur.fetchall()
-        return [r['work_order'] if isinstance(r, dict) else r[0] for r in rows]
+        ready = [r['work_order'] if isinstance(r, dict) else r[0] for r in cur.fetchall() if (r['work_order'] if isinstance(r, dict) else r[0])]
+
+        # Also include all work orders that have plans created in PPC
+        cur.execute("""
+            SELECT DISTINCT wo.work_order
+            FROM work_orders wo
+            JOIN plans p ON p.work_order_id = wo.id
+            ORDER BY wo.work_order DESC
+        """)
+        with_plans = [r['work_order'] if isinstance(r, dict) else r[0] for r in cur.fetchall() if (r['work_order'] if isinstance(r, dict) else r[0])]
+
+        # Merge deduplicated
+        seen = set()
+        result = []
+        for w in ready + with_plans:
+            w_str = str(w).strip()
+            if w_str and w_str not in seen:
+                seen.add(w_str)
+                result.append(w_str)
+
+        if not result:
+            cur.execute("SELECT DISTINCT work_order FROM work_orders ORDER BY work_order DESC")
+            for r in cur.fetchall():
+                w_str = (r['work_order'] if isinstance(r, dict) else r[0] or '').strip()
+                if w_str and w_str not in seen:
+                    seen.add(w_str)
+                    result.append(w_str)
+        return result
     except Exception as e:
         print(f"[WARN] Error fetching ready work orders: {e}")
         return []
@@ -1198,20 +1233,55 @@ def api_plans(work_order=None):
         work_order = request.args.get("wo") or request.args.get("work_order") or ""
     work_order = unquote(work_order).strip() if work_order else ""
     con = db(); cur = con.cursor()
-    data = []
+    plans_list = []
+    seen = set()
+
     if work_order:
+        clean_wo = work_order.split('/')[-1].strip()
         try:
             cur.execute("""
-                SELECT DISTINCT p.plan_id FROM plans p
-                JOIN work_orders wo ON p.work_order_id = wo.id
-                WHERE LOWER(TRIM(wo.work_order)) = LOWER(TRIM(?))
+                SELECT p.id, p.plan_id, p.work_order_id, wo.work_order
+                FROM plans p
+                LEFT JOIN work_orders wo ON p.work_order_id = wo.id
+                WHERE LOWER(TRIM(COALESCE(wo.work_order, ''))) = LOWER(TRIM(?))
+                   OR LOWER(TRIM(COALESCE(wo.work_order, ''))) = LOWER(TRIM(?))
+                   OR CAST(wo.id AS CHAR) = ?
+                   OR CAST(p.work_order_id AS CHAR) = ?
+                   OR (wo.work_order IS NOT NULL AND LOWER(TRIM(wo.work_order)) LIKE LOWER(TRIM(?)))
                 ORDER BY p.id ASC
-            """, (work_order,))
-            data = [p["plan_id"] for p in cur.fetchall()]
+            """, (work_order, clean_wo, clean_wo, clean_wo, f"%{clean_wo}%"))
+            for r in cur.fetchall():
+                p_id = r.get('id') if isinstance(r, dict) else r[0]
+                p_code = r.get('plan_id') if isinstance(r, dict) else (r[1] if len(r) > 1 else None)
+                final_code = (p_code or '').strip() or f"Plan-{p_id}"
+                if final_code not in seen:
+                    seen.add(final_code)
+                    plans_list.append(final_code)
         except Exception as e:
             print(f"[WARN] api_plans error: {e}")
+
+    # Fallback directly on plans table if work_order_id matches numeric or string
+    if not plans_list and work_order:
+        try:
+            clean_wo = work_order.split('/')[-1].strip()
+            cur.execute("""
+                SELECT id, plan_id FROM plans 
+                WHERE CAST(work_order_id AS CHAR) = ? 
+                   OR LOWER(TRIM(CAST(work_order_id AS CHAR))) = LOWER(TRIM(?))
+                   OR LOWER(TRIM(COALESCE(plan_id, ''))) = LOWER(TRIM(?))
+            """, (clean_wo, clean_wo, clean_wo))
+            for r in cur.fetchall():
+                p_id = r.get('id') if isinstance(r, dict) else r[0]
+                p_code = r.get('plan_id') if isinstance(r, dict) else (r[1] if len(r) > 1 else None)
+                final_code = (p_code or '').strip() or f"Plan-{p_id}"
+                if final_code not in seen:
+                    seen.add(final_code)
+                    plans_list.append(final_code)
+        except Exception as e:
+            print(f"[WARN] api_plans fallback error: {e}")
+
     con.close()
-    return jsonify(data)
+    return jsonify(plans_list)
 
 @app.route("/api/bags")
 @app.route("/api/bags/<path:plan_id>")
@@ -1224,19 +1294,23 @@ def api_bags(plan_id=None):
     if plan_id:
         try:
             cur.execute("""
-                SELECT b.bag_number, b.shade 
+                SELECT b.bag_number, b.shade, b.id, p.plan_id 
                 FROM bags b
                 JOIN plans p ON b.plan_id = p.id
                 LEFT JOIN finalized_bags fb ON LOWER(TRIM(b.bag_number)) = LOWER(TRIM(fb.bag_number))
-                WHERE (LOWER(TRIM(p.plan_id)) = LOWER(TRIM(?)) OR CAST(p.id AS CHAR) = ?) 
+                WHERE (LOWER(TRIM(COALESCE(p.plan_id, ''))) = LOWER(TRIM(?))
+                   OR CAST(p.id AS CHAR) = ? 
+                   OR CAST(b.plan_id AS CHAR) = ?
+                   OR LOWER(TRIM(COALESCE(p.plan_id, ''))) LIKE ?)
                   AND fb.bag_number IS NULL
                 ORDER BY b.id ASC
-            """, (plan_id, plan_id))
+            """, (plan_id, plan_id, plan_id, f"%{plan_id}%"))
             for b in cur.fetchall():
-                bag_no = b["bag_number"]
-                shade = b["shade"] or ""
-                label = f"{bag_no} ({shade})" if shade else bag_no
-                data.append({"bag_number": bag_no, "shade": shade, "label": label})
+                bag_no = b.get('bag_number') if isinstance(b, dict) else b[0]
+                shade = b.get('shade') if isinstance(b, dict) else b[1]
+                shade_str = (shade or "").strip()
+                label = f"{bag_no} ({shade_str})" if shade_str else bag_no
+                data.append({"bag_number": bag_no, "shade": shade_str, "label": label})
         except Exception as e:
             print(f"[WARN] api_bags error: {e}")
     con.close()
@@ -1529,6 +1603,105 @@ def api_validate_roll_match():
     finally:
         con.close()
 
+@app.route("/api/lot-rolls")
+def api_lot_rolls():
+    wo = (request.args.get("wo") or request.args.get("work_order") or "").strip()
+    bag = (request.args.get("bag") or request.args.get("bag_number") or "").strip()
+    lot = (request.args.get("lot") or request.args.get("lot_name") or "").strip()
+
+    con = db(); cur = con.cursor()
+    rolls = []
+    summary = {
+        "total_rolls": 0,
+        "total_weight": 0.0,
+        "next_roll_no": 1,
+        "lot_needles": "24N",
+        "bag_shade": "",
+        "work_order": wo,
+        "rem_weight": 0.0,
+        "plan_weight": 0.0,
+        "latest_roll": None
+    }
+
+    try:
+        # Fetch lot and bag info
+        cur.execute("""
+            SELECT l.needles, l.fabric_weight as rem_weight, l.plan_weight, b.shade, wo_tbl.work_order
+            FROM lots l
+            JOIN bags b ON l.bag_id = b.id
+            JOIN plans p ON b.plan_id = p.id
+            JOIN work_orders wo_tbl ON p.work_order_id = wo_tbl.id
+            WHERE LOWER(TRIM(b.bag_number)) = LOWER(TRIM(?)) 
+              AND LOWER(TRIM(l.lot_name)) = LOWER(TRIM(?))
+            LIMIT 1
+        """, (bag, lot))
+        lot_meta = cur.fetchone()
+        if lot_meta:
+            m_dict = dict(lot_meta) if isinstance(lot_meta, dict) else {
+                'needles': lot_meta[0], 'rem_weight': lot_meta[1], 'plan_weight': lot_meta[2],
+                'shade': lot_meta[3], 'work_order': lot_meta[4]
+            }
+            summary["lot_needles"] = m_dict.get('needles') or '24N'
+            summary["bag_shade"] = m_dict.get('shade') or ''
+            summary["rem_weight"] = float(m_dict.get('rem_weight') or 0)
+            summary["plan_weight"] = float(m_dict.get('plan_weight') or 0)
+            if not summary["work_order"] and m_dict.get('work_order'):
+                summary["work_order"] = m_dict.get('work_order')
+
+        # Fetch all rolls for this bag and lot
+        cur.execute("""
+            SELECT r.id, r.roll_no, r.weight, r.tube_no, r.created_at, 
+                   r.barcode_used, r.roll_barcode, r.machine_no, r.needles,
+                   COALESCE(r.is_merged, 0) as is_merged,
+                   COALESCE(r.merge_count, 0) as merge_count
+            FROM fabric_rolls r
+            WHERE LOWER(TRIM(r.bag_number)) = LOWER(TRIM(?))
+              AND LOWER(TRIM(r.lot_name)) = LOWER(TRIM(?))
+            ORDER BY r.roll_no ASC, r.id ASC
+        """, (bag, lot))
+        rows = cur.fetchall()
+        max_roll_no = 0
+        total_w = 0.0
+
+        for r in rows:
+            item = dict(r) if isinstance(r, dict) else {
+                'id': r[0], 'roll_no': r[1], 'weight': r[2], 'tube_no': r[3],
+                'created_at': r[4], 'barcode_used': r[5], 'roll_barcode': r[6],
+                'machine_no': r[7], 'needles': r[8], 'is_merged': r[9] if len(r) > 9 else 0,
+                'merge_count': r[10] if len(r) > 10 else 0
+            }
+            w = float(item.get('weight') or 0)
+            total_w += w
+            r_no = int(item.get('roll_no') or 0)
+            if r_no > max_roll_no:
+                max_roll_no = r_no
+            rolls.append(item)
+
+        summary["total_rolls"] = len(rolls)
+        summary["total_weight"] = round(total_w, 2)
+        summary["next_roll_no"] = max_roll_no + 1 if max_roll_no > 0 else 1
+
+        if rolls:
+            latest = rolls[-1]
+            summary["latest_roll"] = {
+                "roll_no": latest.get("roll_no"),
+                "barcode": latest.get("roll_barcode"),
+                "machine_barcode": latest.get("barcode_used"),
+                "machine_no": latest.get("machine_no") or "M-01",
+                "weight": latest.get("weight"),
+                "tube_no": latest.get("tube_no") or "T-101",
+                "created_at": latest.get("created_at"),
+                "shade": summary.get("bag_shade"),
+                "job_wo": f"{summary.get('work_order', '')}"
+            }
+
+    except Exception as e:
+        print(f"[WARN] api_lot_rolls error: {e}")
+    finally:
+        con.close()
+
+    return jsonify({"success": True, "rolls": rolls, "summary": summary})
+
 @app.route("/api/save-roll", methods=["POST"])
 def api_save_roll():
     data = request.json or {}
@@ -1539,7 +1712,7 @@ def api_save_roll():
             FROM bags b
             JOIN plans p ON b.plan_id = p.id
             JOIN work_orders wo ON p.work_order_id = wo.id
-            WHERE b.bag_number = ?
+            WHERE LOWER(TRIM(b.bag_number)) = LOWER(TRIM(?))
         """, (data.get('bag_number'),))
         meta = cur.fetchone()
         if not meta:
@@ -1615,33 +1788,93 @@ def api_save_roll():
         current_job_id = job_row['job'] if job_row else 1
         current_job_full = f"{current_job_id}/{wo_val}"
 
-        # Generate unique 7-digit roll barcode
-        while True:
-            unique_roll_id = ''.join(random.choices(string.digits, k=7))
-            cur.execute("SELECT 1 FROM fabric_rolls WHERE roll_barcode = ?", (unique_roll_id,))
-            if not cur.fetchone():
-                break
+        # Check user-entered roll number for merge or manual assignment
+        input_roll_no = str(data.get('roll_no') or '').strip()
+        target_roll_no = int(input_roll_no) if (input_roll_no and input_roll_no.isdigit() and int(input_roll_no) > 0) else None
 
-        # Max roll number
-        cur.execute("""
-            SELECT MAX(r.roll_no) 
-            FROM fabric_rolls r
-            JOIN bags b ON r.bag_number = b.bag_number
-            WHERE r.work_order = ? AND b.shade = ? AND r.needles LIKE ?
-        """, (wo_val, shade, f"{data['needles']}%"))
-        res = cur.fetchone()
-        max_roll = (res['MAX(r.roll_no)'] if isinstance(res, dict) else res[0]) if res else 0
-        new_roll_no = (max_roll or 0) + 1
+        # Check if this roll already exists in the lot (Merge behavior)
+        existing_roll = None
+        if target_roll_no is not None:
+            cur.execute("""
+                SELECT id, weight, roll_barcode, tube_no, merge_count
+                FROM fabric_rolls
+                WHERE LOWER(TRIM(work_order)) = LOWER(TRIM(?))
+                  AND LOWER(TRIM(bag_number)) = LOWER(TRIM(?))
+                  AND LOWER(TRIM(lot_name)) = LOWER(TRIM(?))
+                  AND roll_no = ?
+            """, (wo_val, data['bag_number'], data['lot_name'], target_roll_no))
+            existing_roll = cur.fetchone()
+
+        if existing_roll:
+            # MERGE ROLL WEIGHT
+            old_w = float(existing_roll['weight'])
+            add_w = float(data['weight'])
+            merged_w = round(old_w + add_w, 2)
+            new_merge_cnt = int(existing_roll.get('merge_count') or 0) + 1
+            roll_barcode = existing_roll['roll_barcode'] or f"R-{data['bag_number']}-{target_roll_no:02d}"
+
+            cur.execute("""
+                UPDATE fabric_rolls 
+                SET weight = ?, tube_no = ?, barcode_used = ?, machine_no = ?, is_merged = 1, merge_count = ?
+                WHERE id = ?
+            """, (merged_w, data.get('tube_no', 'T-101'), barcode_scanned, machine_no, new_merge_cnt, existing_roll['id']))
+
+            # Deduct added weight from lot balance
+            cur.execute("""
+                UPDATE lots 
+                SET fabric_weight = fabric_weight - ? 
+                WHERE lot_name = ? AND needles = ?
+            """, (add_w, data['lot_name'], data['needles']))
+
+            con.commit()
+            return jsonify({
+                "success": True,
+                "is_merged": True,
+                "message": f"Roll #{target_roll_no} already exists! Merged +{add_w} KG into Roll #{target_roll_no}. New Weight: {merged_w} KG",
+                "sticker_data": {
+                    "roll_barcode": roll_barcode,
+                    "bag": data['bag_number'],
+                    "lot": data['lot_name'],
+                    "roll_no": target_roll_no,
+                    "job_wo": current_job_full,
+                    "needle": data['needles'],
+                    "shade": shade,
+                    "machine": machine_no,
+                    "weight": merged_w,
+                    "date": datetime.now().strftime("%d-%b %H:%M"),
+                    "is_merged": True,
+                    "merged_added": add_w
+                }
+            })
+
+        # New Roll: Determine sequential roll number
+        if target_roll_no is not None:
+            new_roll_no = target_roll_no
+        else:
+            cur.execute("""
+                SELECT MAX(r.roll_no) 
+                FROM fabric_rolls r
+                WHERE LOWER(TRIM(r.work_order)) = LOWER(TRIM(?))
+                  AND LOWER(TRIM(r.bag_number)) = LOWER(TRIM(?))
+                  AND LOWER(TRIM(r.lot_name)) = LOWER(TRIM(?))
+            """, (wo_val, data['bag_number'], data['lot_name']))
+            res = cur.fetchone()
+            max_roll = (res['MAX(r.roll_no)'] if isinstance(res, dict) else res[0]) if res else 0
+            new_roll_no = (max_roll or 0) + 1
+
+        # Series-wise barcode: 1 k bad 2 k bad 3: e.g. R-B01-01, R-B01-02
+        clean_bag = str(data['bag_number']).replace(' ', '')
+        unique_roll_id = f"R-{clean_bag}-{new_roll_no:02d}"
 
         cur.execute("""
             INSERT INTO fabric_rolls (
                 work_order, plan_id, bag_number, lot_name, roll_no, 
-                weight, needles, created_at, barcode_used, roll_barcode, machine_no
+                weight, tube_no, needles, created_at, barcode_used, roll_barcode, machine_no, is_merged, merge_count
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
         """, (
             wo_val, data['plan_id'], data['bag_number'], data['lot_name'],
-            new_roll_no, float(data['weight']), data['needles'],
+            new_roll_no, float(data['weight']), data.get('tube_no', 'T-101'), data['needles'],
             datetime.now().strftime("%Y-%m-%d %H:%M"),
             barcode_scanned, unique_roll_id, machine_no
         ))
@@ -1656,6 +1889,7 @@ def api_save_roll():
         con.commit()
         return jsonify({
             "success": True,
+            "is_merged": False,
             "sticker_data": {
                 "roll_barcode": unique_roll_id,
                 "bag": data['bag_number'],
@@ -1665,8 +1899,9 @@ def api_save_roll():
                 "needle": data['needles'],
                 "shade": shade,
                 "machine": machine_no,
-                "weight": data['weight'],
-                "date": datetime.now().strftime("%d-%b %H:%M")
+                "weight": float(data['weight']),
+                "date": datetime.now().strftime("%d-%b %H:%M"),
+                "is_merged": False
             }
         })
     except Exception as e:
@@ -2303,20 +2538,59 @@ def roll_entry_form():
 
             machine_no = m_dict.get('machine_no', 'M-01')
 
-            cur.execute("SELECT MAX(roll_no) FROM fabric_rolls WHERE bag_number = ?", (bag,))
-            row = cur.fetchone()
-            max_no = (row['MAX(roll_no)'] if isinstance(row, dict) else row[0]) if row else None
-            next_roll = 1 if max_no is None else (max_no + 1)
-            barcode = f"R-{bag}-{next_roll:02d}"
+            # Check for existing roll number for merge behavior
+            input_roll_no = str(d.get("roll_no") or "").strip()
+            target_roll = int(input_roll_no) if (input_roll_no and input_roll_no.isdigit() and int(input_roll_no) > 0) else None
 
-            cur.execute("""
-                INSERT INTO fabric_rolls (work_order, plan_id, bag_number, lot_name, roll_no, weight, tube_no, needles, created_at, barcode_used, roll_barcode, machine_no)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (wo, plan, bag, lot, next_roll, weight, tube, bc_needles, datetime.now().strftime("%Y-%m-%d %H:%M"), barcode_scanned, barcode, machine_no))
+            existing_r = None
+            if target_roll is not None:
+                cur.execute("""
+                    SELECT id, weight, roll_barcode, merge_count FROM fabric_rolls 
+                    WHERE LOWER(TRIM(work_order)) = LOWER(TRIM(?))
+                      AND LOWER(TRIM(bag_number)) = LOWER(TRIM(?))
+                      AND LOWER(TRIM(lot_name)) = LOWER(TRIM(?))
+                      AND roll_no = ?
+                """, (wo, bag, lot, target_roll))
+                existing_r = cur.fetchone()
 
-            cur.execute("UPDATE lots SET fabric_weight = fabric_weight - ? WHERE lot_name = ? AND needles = ?", (weight, lot, needles))
-            con.commit()
-            flash(f"Roll #{next_roll} ({barcode}) added successfully! Machine: {machine_no}", "success")
+            if existing_r:
+                # MERGE ROLL WEIGHT
+                old_w = float(existing_r['weight'])
+                new_tot = round(old_w + weight, 2)
+                m_cnt = int(existing_r.get('merge_count') or 0) + 1
+                cur.execute("""
+                    UPDATE fabric_rolls 
+                    SET weight = ?, tube_no = ?, barcode_used = ?, machine_no = ?, is_merged = 1, merge_count = ?
+                    WHERE id = ?
+                """, (new_tot, tube, barcode_scanned, machine_no, m_cnt, existing_r['id']))
+                cur.execute("UPDATE lots SET fabric_weight = fabric_weight - ? WHERE lot_name = ? AND needles = ?", (weight, lot, needles))
+                con.commit()
+                flash(f"Roll #{target_roll} already existed! Merged +{weight} KG into Roll #{target_roll}. New Total: {new_tot} KG", "success")
+            else:
+                if target_roll is not None:
+                    next_roll = target_roll
+                else:
+                    cur.execute("""
+                        SELECT MAX(roll_no) FROM fabric_rolls 
+                        WHERE LOWER(TRIM(work_order)) = LOWER(TRIM(?))
+                          AND LOWER(TRIM(bag_number)) = LOWER(TRIM(?))
+                          AND LOWER(TRIM(lot_name)) = LOWER(TRIM(?))
+                    """, (wo, bag, lot))
+                    row = cur.fetchone()
+                    max_no = (row['MAX(roll_no)'] if isinstance(row, dict) else row[0]) if row else None
+                    next_roll = 1 if max_no is None else (max_no + 1)
+                
+                clean_bag = str(bag).replace(' ', '')
+                barcode = f"R-{clean_bag}-{next_roll:02d}"
+
+                cur.execute("""
+                    INSERT INTO fabric_rolls (work_order, plan_id, bag_number, lot_name, roll_no, weight, tube_no, needles, created_at, barcode_used, roll_barcode, machine_no, is_merged, merge_count)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
+                """, (wo, plan, bag, lot, next_roll, weight, tube, bc_needles, datetime.now().strftime("%Y-%m-%d %H:%M"), barcode_scanned, barcode, machine_no))
+
+                cur.execute("UPDATE lots SET fabric_weight = fabric_weight - ? WHERE lot_name = ? AND needles = ?", (weight, lot, needles))
+                con.commit()
+                flash(f"Roll #{next_roll} ({barcode}) added successfully! Machine: {machine_no}", "success")
 
         work_orders = get_ready_work_orders(cur)
         return render_template("roll_entry_form.html", work_orders=work_orders)

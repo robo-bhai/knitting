@@ -2,10 +2,11 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import { RollSticker, FabricRoll } from '../../types';
 import { ThermalStickerModal } from '../common/ThermalStickerModal';
+import { ExportPlanModal } from '../common/ExportPlanModal';
 import {
   ScrollText, Printer, Layers, Tag, Cpu, RefreshCw, Copy, Check,
   AlertTriangle, CheckCircle2, XCircle, ArrowRight, FileText,
-  Filter, Info, ShieldCheck, ChevronRight, Hash, Database
+  Filter, Info, ShieldCheck, ChevronRight, Hash, Database, FileSpreadsheet
 } from 'lucide-react';
 
 export const RollEntryView: React.FC = () => {
@@ -35,6 +36,7 @@ export const RollEntryView: React.FC = () => {
 
   // Generated Sticker Modal & Mismatch Modal
   const [activeSticker, setActiveSticker] = useState<RollSticker | null>(null);
+  const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   const [mismatchError, setMismatchError] = useState<{
     title: string;
     message: string;
@@ -565,6 +567,17 @@ export const RollEntryView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {/* Export Plan Button */}
+          <button
+            type="button"
+            onClick={() => setIsExportModalOpen(true)}
+            className="px-3 py-1.5 rounded text-xs font-bold border transition-all cursor-pointer shadow-xs bg-gradient-to-b from-emerald-600 via-teal-700 to-emerald-800 hover:from-emerald-500 hover:to-teal-600 text-white border-emerald-950 flex items-center gap-1.5"
+            title="Export this Work Order Plan to Excel workbook"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>Export Plan</span>
+          </button>
+
           {/* Filter Toggle: Complete Series vs All Work Orders */}
           <button
             type="button"
@@ -1179,6 +1192,13 @@ export const RollEntryView: React.FC = () => {
       <ThermalStickerModal
         sticker={activeSticker}
         onClose={() => setActiveSticker(null)}
+      />
+
+      {/* ================= EXPORT PLAN WORKBOOK MODAL ================= */}
+      <ExportPlanModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        defaultWorkOrder={woInput}
       />
     </div>
   );

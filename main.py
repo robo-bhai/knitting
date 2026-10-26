@@ -2582,86 +2582,407 @@ def admin_dashboard():
         con.close()
 
 # ================= EXCEL / CSV REPORT GENERATOR =================
-def generate_plan_excel(wo_name=None, bag_number=None):
-    con = db(); cur = con.cursor()
-    query = """
-        SELECT r.roll_barcode, r.roll_no, r.work_order, r.plan_id, r.bag_number, 
-               b.shade, r.lot_name, r.needles, r.machine_no, r.weight as gross_weight,
-               q.grade_a_weight, q.grade_b_weight,
-               CASE 
-                   WHEN q.in_store = 2 THEN 'Dispatched'
-                   WHEN q.in_store = 1 THEN 'In Store'
-                   WHEN q.grade_a_weight IS NOT NULL THEN 'Checked / QC Done'
-                   ELSE 'Knitted / Pending QC'
-               END as status,
-               q.checked_at
-        FROM fabric_rolls r
-        LEFT JOIN bags b ON r.bag_number = b.bag_number
-        LEFT JOIN quality_checks q ON r.roll_barcode = q.roll_id
+def get_wo_plan_report_data(wo_name=None, bag_number=None):
     """
-    params = []
-    if bag_number:
-        query += " WHERE r.bag_number = ? ORDER BY r.roll_no ASC"
-        params.append(bag_number)
-        filename_prefix = f"plan_{bag_number}"
-    elif wo_name:
-        query += " WHERE r.work_order = ? ORDER BY r.bag_number ASC, r.roll_no ASC"
-        params.append(wo_name)
-        filename_prefix = f"plan_report_{wo_name}"
-    else:
-        query += " ORDER BY r.id DESC LIMIT 500"
-        filename_prefix = "plan_report_all"
+    Extracts structured, lot-wise production and PPC data for a Work Order or Bag.
+    Merges PPC planned targets with actual fed rolls, quality checks, and dispatch records.
+    """
+    con = db(); cur = con.cursor()
+    bags_map = {}
 
-    cur.execute(query, tuple(params))
-    rows = cur.fetchall()
+    # 1. Query PPC Hierarchy (Work Order -> Plans -> Bags -> Lots)
+    ppc_query = """
+        SELECT 
+            wo.work_order,
+            p.plan_id,
+            b.id as bag_id,
+            b.bag_number,
+            b.shade,
+            l.lot_name,
+            l.needles,
+            COALESCE(l.plan_weight, l.fabric_weight, 0) as plan_weight
+        FROM bags b
+        JOIN plans p ON b.plan_id = p.id
+        JOIN work_orders wo ON p.work_order_id = wo.id
+        LEFT JOIN lots l ON l.bag_id = b.id
+    """
+    ppc_params = []
+    conditions = []
+    if wo_name:
+        conditions.append("(LOWER(TRIM(wo.work_order)) = LOWER(TRIM(?)) OR LOWER(TRIM(p.plan_id)) = LOWER(TRIM(?)))")
+        ppc_params.extend([wo_name, wo_name])
+    if bag_number:
+        conditions.append("LOWER(TRIM(b.bag_number)) = LOWER(TRIM(?))")
+        ppc_params.append(bag_number)
+    if conditions:
+        ppc_query += " WHERE " + " AND ".join(conditions)
+    ppc_query += " ORDER BY b.id ASC, l.id ASC"
+
+    try:
+        cur.execute(ppc_query, tuple(ppc_params))
+        for r in cur.fetchall():
+            row = dict(r) if hasattr(r, 'keys') else to_dict(r)
+            b_no = str(row.get('bag_number') or '').strip()
+            if not b_no:
+                continue
+            if b_no not in bags_map:
+                bags_map[b_no] = {
+                    'work_order': row.get('work_order') or wo_name or 'N/A',
+                    'bag_number': b_no,
+                    'plan_id': row.get('plan_id') or 'N/A',
+                    'shade': row.get('shade') or 'N/A',
+                    'needles': row.get('needles') or '24N',
+                    'lots': {}
+                }
+            lot_name = str(row.get('lot_name') or '').strip()
+            if lot_name:
+                if lot_name not in bags_map[b_no]['lots']:
+                    bags_map[b_no]['lots'][lot_name] = {
+                        'lot_name': lot_name,
+                        'needles': row.get('needles') or bags_map[b_no]['needles'],
+                        'plan_weight': float(row.get('plan_weight') or 0),
+                        'produced_weight': 0.0,
+                        'quality_weight': 0.0,
+                        'dispatched_weight': 0.0
+                    }
+                else:
+                    bags_map[b_no]['lots'][lot_name]['plan_weight'] += float(row.get('plan_weight') or 0)
+    except Exception as e:
+        print(f"[WARN] PPC report query: {e}")
+
+    # 2. Query Fed Rolls, Quality Checks, and Dispatch Status
+    rolls_query = """
+        SELECT 
+            r.work_order,
+            r.plan_id,
+            r.bag_number,
+            r.lot_name,
+            r.needles,
+            SUM(COALESCE(r.weight, 0)) as produced_weight,
+            SUM(CASE WHEN q.grade_a_weight IS NOT NULL THEN COALESCE(q.grade_a_weight, r.weight, 0) ELSE 0 END) as quality_weight,
+            SUM(CASE WHEN q.in_store = 2 OR d.bag_number IS NOT NULL THEN COALESCE(q.grade_a_weight, r.weight, 0) ELSE 0 END) as dispatched_weight
+        FROM fabric_rolls r
+        LEFT JOIN quality_checks q ON r.roll_barcode = q.roll_id
+        LEFT JOIN dispatch_records d ON r.bag_number = d.bag_number
+    """
+    roll_params = []
+    r_conditions = []
+    if wo_name:
+        r_conditions.append("(LOWER(TRIM(r.work_order)) = LOWER(TRIM(?)) OR LOWER(TRIM(r.plan_id)) = LOWER(TRIM(?)))")
+        roll_params.extend([wo_name, wo_name])
+    if bag_number:
+        r_conditions.append("LOWER(TRIM(r.bag_number)) = LOWER(TRIM(?))")
+        roll_params.append(bag_number)
+    if r_conditions:
+        rolls_query += " WHERE " + " AND ".join(r_conditions)
+    rolls_query += " GROUP BY r.work_order, r.plan_id, r.bag_number, r.lot_name, r.needles"
+
+    try:
+        cur.execute(rolls_query, tuple(roll_params))
+        for r in cur.fetchall():
+            row = dict(r) if hasattr(r, 'keys') else to_dict(r)
+            b_no = str(row.get('bag_number') or '').strip()
+            if not b_no:
+                continue
+            if b_no not in bags_map:
+                bags_map[b_no] = {
+                    'work_order': row.get('work_order') or wo_name or 'N/A',
+                    'bag_number': b_no,
+                    'plan_id': row.get('plan_id') or 'N/A',
+                    'shade': 'N/A',
+                    'needles': row.get('needles') or '24N',
+                    'lots': {}
+                }
+            lot_name = str(row.get('lot_name') or 'Default Lot').strip()
+            if lot_name not in bags_map[b_no]['lots']:
+                bags_map[b_no]['lots'][lot_name] = {
+                    'lot_name': lot_name,
+                    'needles': row.get('needles') or bags_map[b_no]['needles'],
+                    'plan_weight': 0.0,
+                    'produced_weight': float(row.get('produced_weight') or 0),
+                    'quality_weight': float(row.get('quality_weight') or 0),
+                    'dispatched_weight': float(row.get('dispatched_weight') or 0)
+                }
+            else:
+                bags_map[b_no]['lots'][lot_name]['produced_weight'] += float(row.get('produced_weight') or 0)
+                bags_map[b_no]['lots'][lot_name]['quality_weight'] += float(row.get('quality_weight') or 0)
+                bags_map[b_no]['lots'][lot_name]['dispatched_weight'] += float(row.get('dispatched_weight') or 0)
+    except Exception as e:
+        print(f"[WARN] Rolls report query: {e}")
+
+    # 3. Backfill missing shades or details from bags table
+    for b_no, b_info in bags_map.items():
+        if b_info['shade'] == 'N/A':
+            try:
+                cur.execute("SELECT shade, plan_id FROM bags WHERE LOWER(TRIM(bag_number)) = LOWER(TRIM(?)) LIMIT 1", (b_no,))
+                sh_row = cur.fetchone()
+                if sh_row:
+                    sh_dict = dict(sh_row) if hasattr(sh_row, 'keys') else {'shade': sh_row[0]}
+                    if sh_dict.get('shade'):
+                        b_info['shade'] = sh_dict['shade']
+            except Exception:
+                pass
+
     con.close()
+    return bags_map
+
+def generate_plan_excel(wo_name=None, bag_number=None):
+    """
+    Generates a professionally styled Excel workbook matching user specification:
+      - Row 1: Columns (Work Order, Bag Number, Plan ID, Shade, Needles, Lot, Planned Weight, Produced Weight, Quality Weight, Dispatched Weight)
+      - Row 2+: For each Bag:
+          * Large prominent Badge Row for the Bag
+          * Lot-wise data rows
+          * Total weight row for that bag
+          * Blank separator row
+      - End: Overall Grand Total row for the entire Work Order
+    """
+    bags_map = get_wo_plan_report_data(wo_name=wo_name, bag_number=bag_number)
+    safe_wo = (wo_name or bag_number or "All_Plans").replace("/", "_").replace(" ", "_")
+    filename_prefix = f"plan_export_{safe_wo}"
+
+    # Calculate Totals
+    grand_totals = {
+        'planned': 0.0,
+        'produced': 0.0,
+        'quality': 0.0,
+        'dispatched': 0.0
+    }
 
     try:
         import xlsxwriter
         output = io.BytesIO()
         workbook = xlsxwriter.Workbook(output, {'in_memory': True})
-        worksheet = workbook.add_worksheet('Plan Report')
+        worksheet = workbook.add_worksheet('Plan Export')
+        worksheet.set_paper(9) # A4
+        worksheet.fit_to_pages(1, 0)
 
+        # Style Formats
         header_fmt = workbook.add_format({
-            'bold': True, 'bg_color': '#0f172a', 'font_color': '#ffffff',
-            'border': 1, 'align': 'center', 'valign': 'vcenter'
+            'bold': True,
+            'bg_color': '#0f172a', # Dark Midnight Slate
+            'font_color': '#ffffff',
+            'font_name': 'Calibri',
+            'font_size': 11,
+            'border': 1,
+            'border_color': '#334155',
+            'align': 'center',
+            'valign': 'vcenter'
         })
-        num_fmt = workbook.add_format({'num_format': '#,##0.00', 'border': 1})
-        text_fmt = workbook.add_format({'border': 1})
-        date_fmt = workbook.add_format({'border': 1, 'align': 'center'})
 
+        badge_fmt = workbook.add_format({
+            'bold': True,
+            'font_name': 'Calibri',
+            'font_size': 12,
+            'bg_color': '#1e3a8a', # Royal Blue Badge
+            'font_color': '#ffffff',
+            'border': 1,
+            'border_color': '#172554',
+            'align': 'left',
+            'valign': 'vcenter',
+            'indent': 1
+        })
+
+        data_text_fmt = workbook.add_format({
+            'font_name': 'Calibri',
+            'font_size': 10,
+            'border': 1,
+            'border_color': '#cbd5e1',
+            'valign': 'vcenter'
+        })
+
+        data_text_center_fmt = workbook.add_format({
+            'font_name': 'Calibri',
+            'font_size': 10,
+            'border': 1,
+            'border_color': '#cbd5e1',
+            'align': 'center',
+            'valign': 'vcenter'
+        })
+
+        data_num_fmt = workbook.add_format({
+            'font_name': 'Calibri',
+            'font_size': 10,
+            'border': 1,
+            'border_color': '#cbd5e1',
+            'num_format': '#,##0.00',
+            'align': 'right',
+            'valign': 'vcenter'
+        })
+
+        bag_total_label_fmt = workbook.add_format({
+            'bold': True,
+            'font_name': 'Calibri',
+            'font_size': 10,
+            'bg_color': '#e2e8f0', # Light Slate Subtotal
+            'font_color': '#0f172a',
+            'border': 1,
+            'border_color': '#94a3b8',
+            'align': 'right',
+            'valign': 'vcenter',
+            'indent': 1
+        })
+
+        bag_total_num_fmt = workbook.add_format({
+            'bold': True,
+            'font_name': 'Calibri',
+            'font_size': 10,
+            'bg_color': '#e2e8f0',
+            'font_color': '#0f172a',
+            'border': 1,
+            'border_color': '#94a3b8',
+            'num_format': '#,##0.00',
+            'align': 'right',
+            'valign': 'vcenter'
+        })
+
+        grand_total_label_fmt = workbook.add_format({
+            'bold': True,
+            'font_name': 'Calibri',
+            'font_size': 11,
+            'bg_color': '#0f172a', # Dark Slate with Golden Text
+            'font_color': '#fde047',
+            'border': 1,
+            'border_color': '#020617',
+            'top': 1,
+            'bottom': 6, # Double bottom border
+            'align': 'right',
+            'valign': 'vcenter',
+            'indent': 1
+        })
+
+        grand_total_num_fmt = workbook.add_format({
+            'bold': True,
+            'font_name': 'Calibri',
+            'font_size': 11,
+            'bg_color': '#0f172a',
+            'font_color': '#fde047',
+            'border': 1,
+            'border_color': '#020617',
+            'top': 1,
+            'bottom': 6,
+            'num_format': '#,##0.00',
+            'align': 'right',
+            'valign': 'vcenter'
+        })
+
+        # Row 1: Header Columns
         headers = [
-            "Roll Barcode", "Roll #", "Work Order", "Plan ID", "Bag #",
-            "Shade", "Lot Name", "Needles", "Machine", "Gross Weight (KG)",
-            "Grade A (KG)", "Grade B (KG)", "Status", "QC Timestamp"
+            "Work Order",
+            "Bag Number",
+            "Plan ID",
+            "Shade",
+            "Needle",
+            "Lot",
+            "Planned Weight (KG)",
+            "Produced Weight (KG)",
+            "Quality Weight (KG)",
+            "Dispatched Weight (KG)"
         ]
+        worksheet.set_row(0, 26)
         for col_idx, h in enumerate(headers):
             worksheet.write(0, col_idx, h, header_fmt)
 
-        row_idx = 1
-        for r in rows:
-            worksheet.write(row_idx, 0, r['roll_barcode'] or '', text_fmt)
-            worksheet.write(row_idx, 1, r['roll_no'] or 0, text_fmt)
-            worksheet.write(row_idx, 2, r['work_order'] or '', text_fmt)
-            worksheet.write(row_idx, 3, r['plan_id'] or '', text_fmt)
-            worksheet.write(row_idx, 4, r['bag_number'] or '', text_fmt)
-            worksheet.write(row_idx, 5, r['shade'] or '', text_fmt)
-            worksheet.write(row_idx, 6, r['lot_name'] or '', text_fmt)
-            worksheet.write(row_idx, 7, r['needles'] or '', text_fmt)
-            worksheet.write(row_idx, 8, r['machine_no'] or '-', text_fmt)
-            worksheet.write_number(row_idx, 9, float(r['gross_weight'] or 0), num_fmt)
-            worksheet.write_number(row_idx, 10, float(r['grade_a_weight'] or 0), num_fmt)
-            worksheet.write_number(row_idx, 11, float(r['grade_b_weight'] or 0), num_fmt)
-            worksheet.write(row_idx, 12, r['status'] or '', text_fmt)
-            worksheet.write(row_idx, 13, str(r['checked_at'] or ''), date_fmt)
-            row_idx += 1
+        current_row = 1
 
-        worksheet.set_column('A:A', 16)
-        worksheet.set_column('B:B', 8)
-        worksheet.set_column('C:E', 14)
-        worksheet.set_column('F:H', 12)
-        worksheet.set_column('I:L', 14)
-        worksheet.set_column('M:N', 18)
+        # If no bags found, write friendly empty row
+        if not bags_map:
+            worksheet.set_row(current_row, 24)
+            worksheet.merge_range(
+                current_row, 0, current_row, 9,
+                f"No production plan or roll records found for Work Order '{wo_name or 'N/A'}'",
+                data_text_center_fmt
+            )
+            current_row += 1
+        else:
+            # Process each Bag
+            for b_no, b_info in sorted(bags_map.items()):
+                # 1. Prominent Bag Badge Row
+                worksheet.set_row(current_row, 26)
+                badge_text = f"🏷️  BAG / BADGE #{b_info['bag_number']}    |    PLAN ID: {b_info['plan_id']}    |    SHADE: {b_info['shade']}    |    NEEDLES: {b_info['needles']}"
+                worksheet.merge_range(current_row, 0, current_row, 9, badge_text, badge_fmt)
+                current_row += 1
+
+                bag_plan_sum = 0.0
+                bag_prod_sum = 0.0
+                bag_qual_sum = 0.0
+                bag_disp_sum = 0.0
+
+                # 2. Lot Data Rows under this Bag
+                lots_list = list(b_info['lots'].values())
+                if not lots_list:
+                    # Single empty row if no lots defined yet
+                    lots_list = [{
+                        'lot_name': 'Pending Lots',
+                        'needles': b_info['needles'],
+                        'plan_weight': 0.0,
+                        'produced_weight': 0.0,
+                        'quality_weight': 0.0,
+                        'dispatched_weight': 0.0
+                    }]
+
+                for lot in lots_list:
+                    worksheet.set_row(current_row, 20)
+                    pw = float(lot['plan_weight'] or 0)
+                    pr = float(lot['produced_weight'] or 0)
+                    qw = float(lot['quality_weight'] or 0)
+                    dw = float(lot['dispatched_weight'] or 0)
+
+                    bag_plan_sum += pw
+                    bag_prod_sum += pr
+                    bag_qual_sum += qw
+                    bag_disp_sum += dw
+
+                    worksheet.write(current_row, 0, b_info['work_order'], data_text_center_fmt)
+                    worksheet.write(current_row, 1, b_info['bag_number'], data_text_center_fmt)
+                    worksheet.write(current_row, 2, b_info['plan_id'], data_text_center_fmt)
+                    worksheet.write(current_row, 3, b_info['shade'], data_text_center_fmt)
+                    worksheet.write(current_row, 4, lot.get('needles') or b_info['needles'], data_text_center_fmt)
+                    worksheet.write(current_row, 5, lot['lot_name'], data_text_fmt)
+                    worksheet.write_number(current_row, 6, pw, data_num_fmt)
+                    worksheet.write_number(current_row, 7, pr, data_num_fmt)
+                    worksheet.write_number(current_row, 8, qw, data_num_fmt)
+                    worksheet.write_number(current_row, 9, dw, data_num_fmt)
+                    current_row += 1
+
+                # 3. Subtotal Row for this Bag
+                worksheet.set_row(current_row, 22)
+                worksheet.merge_range(current_row, 0, current_row, 5, f"TOTAL FOR BAG #{b_info['bag_number']}:", bag_total_label_fmt)
+                worksheet.write_number(current_row, 6, bag_plan_sum, bag_total_num_fmt)
+                worksheet.write_number(current_row, 7, bag_prod_sum, bag_total_num_fmt)
+                worksheet.write_number(current_row, 8, bag_qual_sum, bag_total_num_fmt)
+                worksheet.write_number(current_row, 9, bag_disp_sum, bag_total_num_fmt)
+                current_row += 1
+
+                grand_totals['planned'] += bag_plan_sum
+                grand_totals['produced'] += bag_prod_sum
+                grand_totals['quality'] += bag_qual_sum
+                grand_totals['dispatched'] += bag_disp_sum
+
+                # 4. Blank spacer row
+                worksheet.set_row(current_row, 10)
+                current_row += 1
+
+            # End: Overall Grand Total Row for the entire Work Order
+            worksheet.set_row(current_row, 26)
+            grand_title = f"⭐ OVERALL WORK ORDER TOTAL ({wo_name or 'ALL ORDERS'}):"
+            worksheet.merge_range(current_row, 0, current_row, 5, grand_title, grand_total_label_fmt)
+            worksheet.write_number(current_row, 6, grand_totals['planned'], grand_total_num_fmt)
+            worksheet.write_number(current_row, 7, grand_totals['produced'], grand_total_num_fmt)
+            worksheet.write_number(current_row, 8, grand_totals['quality'], grand_total_num_fmt)
+            worksheet.write_number(current_row, 9, grand_totals['dispatched'], grand_total_num_fmt)
+
+        # Set Column Widths for clean layout
+        worksheet.set_column('A:A', 16) # Work Order
+        worksheet.set_column('B:B', 15) # Bag Number
+        worksheet.set_column('C:C', 14) # Plan ID
+        worksheet.set_column('D:D', 16) # Shade
+        worksheet.set_column('E:E', 12) # Needle
+        worksheet.set_column('F:F', 16) # Lot
+        worksheet.set_column('G:G', 20) # Planned Weight
+        worksheet.set_column('H:H', 20) # Produced Weight
+        worksheet.set_column('I:I', 20) # Quality Weight
+        worksheet.set_column('J:J', 20) # Dispatched Weight
 
         workbook.close()
         output.seek(0)
@@ -2671,21 +2992,33 @@ def generate_plan_excel(wo_name=None, bag_number=None):
             as_attachment=True,
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-    except Exception:
+    except Exception as e:
+        print(f"[EXCEL GENERATOR WARNING] xlsxwriter failed ({e}), falling back to CSV.")
         import csv
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow([
-            "Roll Barcode", "Roll #", "Work Order", "Plan ID", "Bag #",
-            "Shade", "Lot Name", "Needles", "Machine", "Gross Weight (KG)",
-            "Grade A (KG)", "Grade B (KG)", "Status", "QC Timestamp"
+            "Work Order", "Bag Number", "Plan ID", "Shade", "Needle",
+            "Lot", "Planned Weight (KG)", "Produced Weight (KG)",
+            "Quality Weight (KG)", "Dispatched Weight (KG)"
         ])
-        for r in rows:
-            writer.writerow([
-                r['roll_barcode'], r['roll_no'], r['work_order'], r['plan_id'], r['bag_number'],
-                r['shade'], r['lot_name'], r['needles'], r['machine_no'], r['gross_weight'],
-                r['grade_a_weight'], r['grade_b_weight'], r['status'], r['checked_at']
-            ])
+        for b_no, b_info in sorted(bags_map.items()):
+            writer.writerow([f"=== BAG #{b_info['bag_number']} | Plan: {b_info['plan_id']} | Shade: {b_info['shade']} ==="] + [""] * 9)
+            bag_p = bag_pr = bag_q = bag_d = 0.0
+            for lot in b_info['lots'].values():
+                pw = float(lot['plan_weight'] or 0)
+                pr = float(lot['produced_weight'] or 0)
+                qw = float(lot['quality_weight'] or 0)
+                dw = float(lot['dispatched_weight'] or 0)
+                bag_p += pw; bag_pr += pr; bag_q += qw; bag_d += dw
+                writer.writerow([
+                    b_info['work_order'], b_info['bag_number'], b_info['plan_id'],
+                    b_info['shade'], lot.get('needles') or b_info['needles'],
+                    lot['lot_name'], pw, pr, qw, dw
+                ])
+            writer.writerow(["SUBTOTAL FOR BAG #" + str(b_no), "", "", "", "", "", bag_p, bag_pr, bag_q, bag_d])
+            writer.writerow([])
+        writer.writerow(["OVERALL WORK ORDER TOTAL", "", "", "", "", "", grand_totals['planned'], grand_totals['produced'], grand_totals['quality'], grand_totals['dispatched']])
         output.seek(0)
         return send_file(
             io.BytesIO(output.getvalue().encode('utf-8')),
@@ -2694,15 +3027,38 @@ def generate_plan_excel(wo_name=None, bag_number=None):
             mimetype="text/csv"
         )
 
-@app.route("/reports/export-plan", methods=["POST"])
+@app.route("/reports/export-plan", methods=["GET", "POST"])
 def export_plan_report():
-    wo = request.form.get("work_order", "").strip()
+    wo = (request.form.get("work_order") or request.args.get("work_order") or "").strip()
     return generate_plan_excel(wo_name=wo)
 
 @app.route("/reports/export-plan-excel")
 def export_plan_excel():
     bag = request.args.get("bag_number", "").strip()
-    return generate_plan_excel(bag_number=bag)
+    wo = request.args.get("work_order", "").strip()
+    return generate_plan_excel(wo_name=wo, bag_number=bag)
+
+@app.route("/api/export-plan-work-orders")
+def api_export_plan_work_orders():
+    """Returns list of all distinct work orders for Export Plan modal autocomplete"""
+    con = db(); cur = con.cursor()
+    wos = []
+    try:
+        cur.execute("""
+            SELECT DISTINCT work_order FROM work_orders 
+            UNION 
+            SELECT DISTINCT work_order FROM fabric_rolls WHERE work_order IS NOT NULL AND work_order != ''
+            ORDER BY 1 DESC
+        """)
+        for r in cur.fetchall():
+            val = r['work_order'] if hasattr(r, 'keys') else r[0]
+            if val and str(val).strip():
+                wos.append(str(val).strip())
+    except Exception as e:
+        print(f"[API ERROR] api_export_plan_work_orders: {e}")
+    finally:
+        con.close()
+    return jsonify({"success": True, "work_orders": wos})
 
 @app.route("/roll-entry/form", methods=["GET", "POST"])
 @role_required(['clerk', 'incharge', 'manager', 'admin'])

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { ExportPlanModal } from '../common/ExportPlanModal';
 import {
   FileSpreadsheet, Download, Filter, Layers, CheckCircle2,
   AlertCircle, Table
@@ -12,6 +13,7 @@ export const ReportsMenuView: React.FC = () => {
   } = useApp();
 
   const [selectedWo, setSelectedWo] = useState<string>(workOrders[0]?.work_order || '');
+  const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
 
   // Build the Detailed Plan Report exactly as defined in export_plan_report in main.py:
   const woLots = lots.filter(l => {
@@ -131,11 +133,11 @@ export const ReportsMenuView: React.FC = () => {
         </div>
 
         <button
-          onClick={handleExportCsv}
-          className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center gap-2 shadow-sm transition-colors self-start"
+          onClick={() => setIsExportModalOpen(true)}
+          className="px-4 py-2 bg-gradient-to-r from-emerald-600 via-teal-700 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-lg text-xs font-bold flex items-center gap-2 shadow-md transition-all self-start cursor-pointer border border-emerald-800"
         >
-          <Download className="w-4 h-4 text-emerald-400" />
-          Download Excel (XLSX / CSV)
+          <FileSpreadsheet className="w-4 h-4 text-emerald-200" />
+          <span>Export Plan (Excel Workbook)</span>
         </button>
       </div>
 
@@ -244,6 +246,12 @@ export const ReportsMenuView: React.FC = () => {
           )}
         </div>
       </div>
+
+      <ExportPlanModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        defaultWorkOrder={selectedWo}
+      />
     </div>
   );
 };

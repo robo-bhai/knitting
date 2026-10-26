@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { UserRole } from '../../types';
+import { ExportPlanModal } from '../common/ExportPlanModal';
 import {
-  Factory, UserCircle2, LogOut, Code2, Shield, Menu, Monitor
+  Factory, UserCircle2, LogOut, Code2, Shield, Menu, Monitor, FileSpreadsheet
 } from 'lucide-react';
 
 interface Props {
@@ -14,6 +15,7 @@ interface Props {
 
 export const Navbar: React.FC<Props> = ({ setActiveTab, toggleMobileSidebar, onLaunchDesktopMode }) => {
   const { currentUser, switchRole, logout } = useApp();
+  const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
 
   return (
     <header className="bg-gradient-to-r from-slate-200 via-slate-100 to-slate-200 border-b border-slate-400 text-slate-800 sticky top-0 z-40 shadow-xs select-none">
@@ -46,6 +48,15 @@ export const Navbar: React.FC<Props> = ({ setActiveTab, toggleMobileSidebar, onL
 
         {/* Right: Desktop Window Button, Role Switcher, Template Explorer & User */}
         <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => setIsExportModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-b from-emerald-600 via-teal-700 to-emerald-800 hover:from-emerald-500 hover:to-teal-600 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer border border-emerald-950"
+            title="Export Work Order Plan to Excel workbook"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Export Plan</span>
+          </button>
+
           {onLaunchDesktopMode && (
             <button
               onClick={onLaunchDesktopMode}
@@ -128,6 +139,11 @@ export const Navbar: React.FC<Props> = ({ setActiveTab, toggleMobileSidebar, onL
           )}
         </div>
       </div>
+
+      <ExportPlanModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+      />
     </header>
   );
 };

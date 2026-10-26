@@ -476,7 +476,7 @@ CREATE TABLE `quality_checks` (
   `checked_at` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `roll_id` (`roll_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -485,7 +485,7 @@ CREATE TABLE `quality_checks` (
 
 LOCK TABLES `quality_checks` WRITE;
 /*!40000 ALTER TABLE `quality_checks` DISABLE KEYS */;
-INSERT INTO `quality_checks` VALUES (1,'R-341028-02',33.6,33.6,0,0,'2026-10-26 08:17');
+INSERT INTO `quality_checks` VALUES (1,'R-341028-02',33.6,33.6,0,0,'2026-10-26 08:17'),(2,'R-341028-01',22.6,22.6,0,0,'2026-10-26 08:18');
 /*!40000 ALTER TABLE `quality_checks` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -630,4 +630,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-10-26  8:17:20
+-- Dump completed on 2026-10-26  8:18:22

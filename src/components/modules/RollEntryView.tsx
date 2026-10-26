@@ -11,7 +11,7 @@ import {
 export const RollEntryView: React.FC = () => {
   const {
     workOrders, plans, bags, lots, finalizedBags,
-    getLotsForBag, saveRoll, machineAssignments, rolls
+    getLotsForBag, saveRoll, machineAssignments, rolls, assignMachine
   } = useApp();
 
   // Filter mode: Complete Series Only vs All PPC Work Orders
@@ -222,6 +222,102 @@ export const RollEntryView: React.FC = () => {
     return availableLots.find(l => l.lot_name.toLowerCase().trim() === selectedLot.toLowerCase().trim()) || null;
   }, [availableLots, selectedLot]);
 
+  // Auto-detect matching signed barcode if field is currently blank
+  useEffect(() => {
+    if (!woInput.trim()) return;
+    const cleanWo = woInput.trim().split('/').pop()?.trim().toLowerCase() || woInput.trim().toLowerCase();
+    const targetNeedles = (currentLotObj?.needles || '24N').trim().toLowerCase();
+
+    // Look for machine assignment matching WO and Needles
+    const matched = machineAssignments.find(m => {
+      const text = (m.job_full_text || '').toLowerCase();
+      const mNeedles = (m.needles || '').trim().toLowerCase();
+      const woOk = text.includes(cleanWo) || cleanWo.includes(text) || (m as any).work_order?.toLowerCase() === cleanWo;
+      const needlesOk = mNeedles === targetNeedles || mNeedles.includes(targetNeedles) || targetNeedles.includes(mNeedles);
+      return woOk && needlesOk;
+    });
+
+    if (matched && !machineBarcodeInput) {
+      setMachineBarcodeInput(matched.unique_code);
+    }
+  }, [woInput, currentLotObj?.needles, machineAssignments]);
+
+  // 3-Point Real-Time Validation: Scanned Barcode vs Auto-Detected System Values
+  const validationResult = useMemo(() => {
+    const code = machineBarcodeInput.trim();
+    const detectedWo = woInput.split('/').pop()?.trim() || woInput.trim();
+    const detectedShade = currentBagObj?.shade || '';
+    const detectedNeedles = currentLotObj?.needles || '24N';
+
+    if (!code || code.length !== 5) {
+      return {
+        status: 'empty' as const,
+        allMatch: false,
+        message: 'Scan the pre-printed 5-digit barcode on the roll / material',
+        matched: null,
+        scannedWo: '',
+        scannedShade: '',
+        scannedNeedles: '',
+        detectedWo,
+        detectedShade,
+        detectedNeedles,
+        woMatch: false,
+        shadeMatch: false,
+        needlesMatch: false
+      };
+    }
+
+    const matched = machineAssignments.find(m => m.unique_code.trim() === code);
+
+    if (!matched) {
+      return {
+        status: 'not_found' as const,
+        allMatch: false,
+        message: `🚨 Scanned 5-Digit Barcode '${code}' is NOT signed in the system!`,
+        matched: null,
+        scannedWo: '',
+        scannedShade: '',
+        scannedNeedles: '',
+        detectedWo,
+        detectedShade,
+        detectedNeedles,
+        woMatch: false,
+        shadeMatch: false,
+        needlesMatch: false
+      };
+    }
+
+    const clean = (s: string) => (s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+    const scannedWo = matched.work_order || (matched.job_full_text?.split('/')[1]) || '';
+    const scannedShade = matched.shade || '';
+    const scannedNeedles = matched.needles || '';
+
+    const woMatch = Boolean(clean(scannedWo) && clean(detectedWo) && clean(scannedWo) === clean(detectedWo));
+    const shadeMatch = Boolean(!scannedShade || !detectedShade || clean(scannedShade) === clean(detectedShade));
+    const needlesMatch = Boolean(clean(scannedNeedles) && clean(detectedNeedles) && clean(scannedNeedles) === clean(detectedNeedles));
+
+    const allMatch = woMatch && shadeMatch && needlesMatch;
+
+    return {
+      status: (allMatch ? 'success' : 'mismatch') as 'success' | 'mismatch',
+      allMatch,
+      woMatch,
+      shadeMatch,
+      needlesMatch,
+      matched,
+      scannedWo,
+      scannedShade,
+      scannedNeedles,
+      detectedWo,
+      detectedShade,
+      detectedNeedles,
+      message: allMatch
+        ? `✅ 100% SPEC MATCH: Machine M#${matched.machine_no} verified! All 3 specifications match.`
+        : `🚨 SPECIFICATION MISMATCH: Scanned Barcode '${code}' does not match auto-detected system values!`
+    };
+  }, [machineBarcodeInput, machineAssignments, woInput, currentBagObj?.shade, currentLotObj?.needles]);
+
   // Feeded Rolls for the selected Lot
   const lotFeededRolls = useMemo(() => {
     if (!woInput || !selectedBag || !selectedLot) return [];
@@ -261,6 +357,27 @@ export const RollEntryView: React.FC = () => {
       setIsMergedDetected(false);
     }
   }, [rollNoInput, lotFeededRolls]);
+
+  // When user scans or changes Work Order Badge
+  const handleWoInput = (val: string) => {
+    setWoInput(val);
+
+    // If scanned barcode matches a Bag Number directly, auto-select its WO, Plan, Bag
+    const cleanVal = val.trim().toLowerCase();
+    const matchedBag = bags.find(b => b.bag_number.toLowerCase() === cleanVal || b.bag_number.split('(')[0].trim().toLowerCase() === cleanVal);
+    if (matchedBag) {
+      const parentPlan = plans.find(p => p.id === matchedBag.plan_id || String(p.id) === String(matchedBag.plan_id));
+      if (parentPlan) {
+        const parentWo = workOrders.find(w => w.id === parentPlan.work_order_id || String(w.id) === String(parentPlan.work_order_id));
+        if (parentWo) {
+          setWoInput(parentWo.work_order);
+          setSelectedPlan(parentPlan.plan_id);
+          setSelectedBag(matchedBag.bag_number);
+          return;
+        }
+      }
+    }
+  };
 
   // When user presses Enter or changes Work Order
   const handleWoKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -319,7 +436,41 @@ export const RollEntryView: React.FC = () => {
     if (!machineBarcodeInput.trim() || machineBarcodeInput.trim().length !== 5) {
       setMismatchError({
         title: '5-Digit Machine Barcode Required',
-        message: 'Please enter the 5-digit Machine Barcode generated in Machine Sign (/machine-sign).'
+        message: 'Please scan or enter the 5-digit Machine Barcode from the roll/material.'
+      });
+      return;
+    }
+
+    // Success Criteria: Only mark successful if Work Order, Shade, and Needles match
+    if (validationResult.status === 'not_found') {
+      setMismatchError({
+        title: '🚨 Barcode Not Signed',
+        message: `Scanned 5-Digit Barcode '${machineBarcodeInput}' is NOT registered in Machine Sign! Pehle machine sign-in (/machine-sign) karein.`
+      });
+      return;
+    }
+
+    if (!validationResult.allMatch) {
+      let msg = 'Roll feed rejected due to specification mismatch:\n';
+      if (!validationResult.woMatch) msg += `• Work Order Mismatch: Scanned '${validationResult.scannedWo}', Expected '${validationResult.detectedWo}'\n`;
+      if (!validationResult.shadeMatch) msg += `• Fabric Shade Mismatch: Scanned '${validationResult.scannedShade}', Expected '${validationResult.detectedShade}'\n`;
+      if (!validationResult.needlesMatch) msg += `• Needles Mismatch: Scanned '${validationResult.scannedNeedles}', Expected '${validationResult.detectedNeedles}'`;
+
+      setMismatchError({
+        title: '🚨 Specification Mismatch!',
+        message: msg,
+        machineSpec: {
+          unique_code: machineBarcodeInput,
+          machine_no: validationResult.matched?.machine_no,
+          work_order: validationResult.scannedWo,
+          shade: validationResult.scannedShade,
+          needles: validationResult.scannedNeedles
+        },
+        lotSpec: {
+          work_order: validationResult.detectedWo,
+          shade: validationResult.detectedShade,
+          needles: validationResult.detectedNeedles
+        }
       });
       return;
     }
@@ -354,6 +505,8 @@ export const RollEntryView: React.FC = () => {
           ? '🚨 Needles Specification Mismatch!'
           : result.mismatch_type === 'work_order'
           ? '🚨 Work Order Mismatch!'
+          : result.mismatch_type === 'shade'
+          ? '🚨 Fabric Shade Mismatch!'
           : '🚨 Specification Mismatch!',
         message: result.message || 'Specifications do not match signed machine.',
         machineSpec: result.machine_spec,
@@ -472,21 +625,21 @@ export const RollEntryView: React.FC = () => {
               {/* PEHLI ROW: 4 Cascading Dropdowns/Inputs in One Row */}
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5">
                 
-                {/* 1. Work Order Box (Enter or Select) */}
+                {/* 1. Work Order Badge Scanning / Input */}
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
                     <label className="block text-[11px] font-black uppercase text-slate-800">
-                      1. Work Order <span className="text-rose-600">*</span>
+                      1. Scan/Select WO <span className="text-rose-600">*</span>
                     </label>
-                    <span className="text-[9px] text-slate-500 font-mono">Enter &crarr;</span>
+                    <span className="text-[9px] text-blue-900 font-mono font-bold">Badge Scan</span>
                   </div>
                   <input
                     type="text"
                     list="wo_datalist"
                     value={woInput}
-                    onChange={e => setWoInput(e.target.value)}
+                    onChange={e => handleWoInput(e.target.value)}
                     onKeyDown={handleWoKeyDown}
-                    placeholder="Enter or select WO..."
+                    placeholder="Scan or select WO..."
                     className="w-full px-2.5 py-1.5 border-2 border-slate-400 rounded text-xs font-mono font-bold uppercase bg-white text-slate-900 shadow-inner focus:border-blue-700 focus:ring-1 focus:ring-blue-700 focus:outline-hidden"
                   />
                   <datalist id="wo_datalist">
@@ -524,14 +677,14 @@ export const RollEntryView: React.FC = () => {
                   </select>
                 </div>
 
-                {/* 3. Bag / Badge Dropdown */}
+                {/* 3. Bag / Badge Dropdown (Auto-detects Shade) */}
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
                     <label className="block text-[11px] font-black uppercase text-slate-800">
                       3. Bag / Badge <span className="text-rose-600">*</span>
                     </label>
-                    <span className="text-[9px] text-blue-900 font-mono font-bold">
-                      {availableBags.length} bag(s)
+                    <span className="text-[9px] text-amber-800 font-mono font-bold">
+                      {currentBagObj?.shade ? `Shade: ${currentBagObj.shade}` : `${availableBags.length} bag(s)`}
                     </span>
                   </div>
                   <select
@@ -550,14 +703,14 @@ export const RollEntryView: React.FC = () => {
                   </select>
                 </div>
 
-                {/* 4. Lot Dropdown */}
+                {/* 4. Lot Dropdown (Auto-detects Needles) */}
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
                     <label className="block text-[11px] font-black uppercase text-slate-800">
                       4. Target Lot <span className="text-rose-600">*</span>
                     </label>
                     <span className="text-[9px] text-emerald-800 font-mono font-bold">
-                      {availableLots.length} lot(s)
+                      {currentLotObj?.needles ? `Needles: ${currentLotObj.needles}` : `${availableLots.length} lot(s)`}
                     </span>
                   </div>
                   <select
@@ -577,6 +730,35 @@ export const RollEntryView: React.FC = () => {
                       );
                     })}
                   </select>
+                </div>
+              </div>
+
+              {/* AUTO-DETECTED SPECIFICATIONS FROM SCANNING WO & LOT */}
+              <div className="p-3 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-lg border border-slate-700 shadow-xs animate-in fade-in duration-200">
+                <div className="flex flex-wrap items-center justify-between gap-2.5 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    <span className="text-[10px] uppercase font-bold text-slate-300 tracking-wider">
+                      Auto-Detected System Values:
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+                    <div className="px-2.5 py-0.5 bg-slate-800 rounded border border-slate-600 flex items-center gap-1.5">
+                      <span className="text-slate-400 text-[10px]">WO:</span>
+                      <strong className="text-white">{woInput || '--'}</strong>
+                    </div>
+
+                    <div className="px-2.5 py-0.5 bg-slate-800 rounded border border-amber-500/40 flex items-center gap-1.5">
+                      <span className="text-amber-400 text-[10px]">Auto-Detected Shade:</span>
+                      <strong className="text-amber-300 font-bold">{currentBagObj?.shade || 'Awaiting Bag'}</strong>
+                    </div>
+
+                    <div className="px-2.5 py-0.5 bg-slate-800 rounded border border-emerald-500/40 flex items-center gap-1.5">
+                      <span className="text-emerald-400 text-[10px]">Auto-Detected Needles:</span>
+                      <strong className="text-emerald-300 font-bold">{currentLotObj?.needles || '24N'}</strong>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -729,38 +911,67 @@ export const RollEntryView: React.FC = () => {
                   </div>
                 )}
 
-                {/* Live Machine Barcode Verification Status */}
+                {/* Live 3-Point Machine Barcode Verification Status (WO, Shade, Needles) */}
                 {machineBarcodeInput.length === 5 && (
-                  <div className={`mt-2.5 p-2.5 rounded border text-xs flex items-center justify-between gap-2 ${
-                    matchedMachine
-                      ? 'bg-gradient-to-r from-emerald-100 to-emerald-200 border-emerald-400 text-emerald-950'
-                      : 'bg-gradient-to-r from-rose-100 to-rose-200 border-rose-400 text-rose-950'
+                  <div className={`mt-2.5 p-3 rounded-lg border text-xs shadow-xs animate-in fade-in duration-150 ${
+                    validationResult.status === 'success'
+                      ? 'bg-gradient-to-r from-emerald-50 to-emerald-100 border-emerald-400 text-emerald-950'
+                      : 'bg-gradient-to-r from-rose-50 to-rose-100 border-rose-400 text-rose-950'
                   }`}>
-                    {matchedMachine ? (
-                      <>
-                        <div className="flex items-center gap-3">
-                          <span className="px-2 py-0.5 rounded bg-slate-800 text-white font-mono text-[11px] font-bold border border-slate-600">
-                            {matchedMachine.machine_no}
-                          </span>
-                          <span className="font-mono text-[11px]">
-                            Needles: <strong>{matchedMachine.needles}</strong> | Signed Job: <strong>{matchedMachine.job_full_text}</strong>
-                          </span>
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          {validationResult.status === 'success' ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                          ) : (
+                            <AlertTriangle className="w-4 h-4 text-rose-700 shrink-0" />
+                          )}
+                          <span className="font-bold text-xs">{validationResult.message}</span>
                         </div>
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-700 text-white flex items-center gap-1 border border-emerald-900">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Machine Verified
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="font-semibold text-rose-900">
-                          Barcode '{machineBarcodeInput}' not signed in system! Please sign machine first in /machine-sign.
-                        </span>
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-rose-700 text-white border border-rose-900">
-                          Not Signed
-                        </span>
-                      </>
-                    )}
+
+                        {validationResult.matched ? (
+                          <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] pt-0.5">
+                            <span className="text-slate-600 text-[10px] uppercase font-bold">Scanned vs System:</span>
+                            <span className={`px-2 py-0.5 rounded border text-[10px] font-bold ${
+                              validationResult.woMatch ? 'bg-emerald-200/70 text-emerald-900 border-emerald-400' : 'bg-rose-200/80 text-rose-900 border-rose-400'
+                            }`}>
+                              WO: {validationResult.scannedWo || '--'} {validationResult.woMatch ? '✓' : '✗'}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded border text-[10px] font-bold ${
+                              validationResult.shadeMatch ? 'bg-emerald-200/70 text-emerald-900 border-emerald-400' : 'bg-rose-200/80 text-rose-900 border-rose-400'
+                            }`}>
+                              Shade: {validationResult.scannedShade || '--'} {validationResult.shadeMatch ? '✓' : '✗'}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded border text-[10px] font-bold ${
+                              validationResult.needlesMatch ? 'bg-emerald-200/70 text-emerald-900 border-emerald-400' : 'bg-rose-200/80 text-rose-900 border-rose-400'
+                            }`}>
+                              Needles: {validationResult.scannedNeedles || '--'} {validationResult.needlesMatch ? '✓' : '✗'}
+                            </span>
+                            <span className="px-2 py-0.5 rounded bg-slate-800 text-white text-[10px] font-bold">
+                              Machine: {validationResult.matched.machine_no}
+                            </span>
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-rose-800 font-sans">
+                            Barcode '{machineBarcodeInput}' is not registered in Machine Sign! Pehle machine sign-in (/machine-sign) karein.
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="shrink-0">
+                        {validationResult.status === 'success' ? (
+                          <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-700 text-white flex items-center gap-1.5 shadow-xs">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            100% SPEC MATCH
+                          </span>
+                        ) : (
+                          <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-700 text-white flex items-center gap-1.5 shadow-xs">
+                            <XCircle className="w-3.5 h-3.5" />
+                            FEED BLOCKED
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

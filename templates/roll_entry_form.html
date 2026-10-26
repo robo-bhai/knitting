@@ -747,6 +747,19 @@
       if (data.success) {
         renderLotDetailsAndRolls(data.summary, data.rolls);
       }
+
+      // Auto-fetch and auto-populate matching machine barcode for this Job / Needle / Shade / WO
+      try {
+        const autoUrl = `/api/auto-machine-barcode?wo=${encodeURIComponent(currentWo)}&shade=${encodeURIComponent(currentShade)}&needles=${encodeURIComponent(currentNeedles)}`;
+        const autoRes = await fetch(autoUrl);
+        const autoData = await autoRes.json();
+        if (autoData && autoData.unique_code) {
+          machineBarcodeInput.value = autoData.unique_code;
+          verifyAndApplyBarcode(autoData.unique_code, false);
+        }
+      } catch (err) {
+        console.warn('Auto barcode fetch error:', err);
+      }
     } catch (e) {
       console.warn('Error loading lot rolls:', e);
     }
@@ -921,9 +934,15 @@
     const mWo = (activeMachineData.work_order || '').trim().toUpperCase();
     const lWo = (currentWo || '').trim().toUpperCase();
 
-    const needlesMatch = !mNeedles || !lNeedles || mNeedles === lNeedles;
-    const woMatch = !mWo || !lWo || mWo === lWo;
-    const shadeMatch = !mShade || !lShade || mShade === lShade;
+    const clean = (s) => (s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const cmN = clean(mNeedles), clN = clean(lNeedles);
+    const cmW = clean(mWo), clW = clean(lWo);
+    const cmS = clean(mShade), clS = clean(lShade);
+
+    // Strict 3-Field Match: Work Order, Shade, and Needles must exactly match
+    const needlesMatch = Boolean(cmN && clN && cmN === clN);
+    const woMatch = Boolean(cmW && clW && cmW === clW);
+    const shadeMatch = Boolean(!cmS || !clS || cmS === clS);
 
     const allMatch = needlesMatch && woMatch && shadeMatch;
 

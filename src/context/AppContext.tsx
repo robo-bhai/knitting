@@ -58,7 +58,7 @@ interface AppContextType {
   updateLotQty: (id: number, newWeight: number) => void;
 
   // Machine Sign
-  assignMachine: (jobText: string, needles: string, machineNo: string, unitNo: number) => string;
+  assignMachine: (jobText: string, needles: string, machineNo: string, unitNo: number, shade?: string, workOrder?: string) => string;
   deleteMachineAssignment: (id: number) => void;
 
   // Roll Entry & Tracking
@@ -548,7 +548,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       machine_no: 'M-01',
       unit_no: 1,
       unique_code: '54219',
-      created_at: '2026-10-18 09:30'
+      created_at: '2026-10-18 09:30',
+      work_order: 'WO-2026-8801',
+      shade: 'Navy Blue'
     },
     {
       id: 2,
@@ -557,7 +559,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       machine_no: 'M-04',
       unit_no: 2,
       unique_code: '81943',
-      created_at: '2026-10-19 14:15'
+      created_at: '2026-10-19 14:15',
+      work_order: 'WO-2026-8801',
+      shade: 'Jet Black'
     },
     {
       id: 3,
@@ -566,16 +570,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       machine_no: 'M-08',
       unit_no: 1,
       unique_code: '39201',
-      created_at: '2026-10-20 08:00'
+      created_at: '2026-10-20 08:00',
+      work_order: 'WO-2026-8802',
+      shade: 'Heather Grey'
+    },
+    {
+      id: 4,
+      job_full_text: '1/786',
+      needles: '2660',
+      machine_no: 'M-07',
+      unit_no: 1,
+      unique_code: '78601',
+      created_at: '2026-10-24 10:00',
+      work_order: '786',
+      shade: 'White'
     }
   ]);
 
-  const assignMachine = (jobText: string, needles: string, machineNo: string, unitNo: number) => {
+  const assignMachine = (jobText: string, needles: string, machineNo: string, unitNo: number, shade?: string, workOrder?: string) => {
     // Generate unique 5-digit code
     let code = '';
     do {
       code = Math.floor(10000 + Math.random() * 90000).toString();
     } while (machineAssignments.some(m => m.unique_code === code));
+
+    let detectedWo = workOrder;
+    if (!detectedWo && jobText.includes('/')) {
+      detectedWo = jobText.split('/')[1].trim();
+    }
 
     const assignment: MachineAssignment = {
       id: Date.now(),
@@ -584,10 +606,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       machine_no: machineNo,
       unit_no: Number(unitNo),
       unique_code: code,
-      created_at: new Date().toISOString().replace('T', ' ').substring(0, 16)
+      created_at: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      work_order: detectedWo || '',
+      shade: shade || ''
     };
     setMachineAssignments(prev => [assignment, ...prev]);
-    showFlash(`Machine ${machineNo} assigned to ${jobText}. Code: ${code}`, 'success');
+    showFlash(`Machine ${machineNo} signed with 5-digit Barcode: ${code} (WO: ${detectedWo || '--'}, Shade: ${shade || '--'}, Needles: ${needles})`, 'success');
     return code;
   };
 
@@ -698,7 +722,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const shade = bag.shade;
     const woVal = data.work_order.trim();
 
-    // 2. Validate 5-Digit Machine Barcode
+    // 2. Validate Scanned 5-Digit Machine Barcode
     const barcodeScanned = data.barcode.trim();
     if (!barcodeScanned) {
       return { success: false, message: '5-Digit Machine Barcode is required!' };
@@ -709,50 +733,79 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return {
         success: false,
         mismatch_type: 'barcode_not_found',
-        message: `5-Digit Machine Barcode '${barcodeScanned}' is not signed! Please Sign In Machine (/machine-sign) first.`
+        message: `🚨 Scanned 5-Digit Barcode '${barcodeScanned}' is NOT signed in system! Pehle Machine Sign-In (/machine-sign) karein.`
       };
     }
 
-    // Determine machine specs
-    const mNeedles = (mAssignment.needles || '').trim().toUpperCase();
-    const lotNeedles = (data.needles || '').trim().toUpperCase();
-
-    let mWo = '';
-    if (mAssignment.job_full_text && mAssignment.job_full_text.includes('/')) {
-      mWo = mAssignment.job_full_text.split('/')[1].trim().toUpperCase();
+    // Values derived from scanned barcode
+    const mNeedles = (mAssignment.needles || '').trim();
+    let mWo = (mAssignment.work_order || '').trim();
+    if (!mWo && mAssignment.job_full_text && mAssignment.job_full_text.includes('/')) {
+      mWo = mAssignment.job_full_text.split('/')[1].trim();
     }
-    const cleanWo = woVal.split('/').pop()?.trim().toUpperCase() || woVal.toUpperCase();
+    const mShade = (mAssignment.shade || '').trim();
+
+    // Auto-detected system values
+    const detectedWo = woVal.split('/').pop()?.trim() || woVal;
+    const detectedShade = (shade || '').trim();
+    const detectedNeedles = (data.needles || '').trim();
 
     const machineSpec = {
       unique_code: barcodeScanned,
       machine_no: mAssignment.machine_no,
       needles: mNeedles,
-      shade: shade,
-      work_order: mWo || cleanWo
+      shade: mShade,
+      work_order: mWo
     };
 
-    // Needles validation
-    if (mNeedles && lotNeedles && mNeedles !== lotNeedles) {
-      return {
-        success: false,
-        mismatch_type: 'needles',
-        message: `Needles Mismatch! Machine signed barcode has needles '${mNeedles}', but selected Lot requires '${lotNeedles}'.`,
-        machine_spec: machineSpec,
-        lot_spec: { needles: lotNeedles, shade, work_order: woVal }
-      };
-    }
+    const lotSpec = {
+      needles: detectedNeedles,
+      shade: detectedShade,
+      work_order: detectedWo
+    };
 
-    // Work order validation
-    if (mWo && cleanWo && mWo !== cleanWo) {
+    const clean = (s: string) => (s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+    // 1. Strict Work Order Match
+    const cMWo = clean(mWo);
+    const cSysWo = clean(detectedWo);
+    if (cMWo !== cSysWo) {
       return {
         success: false,
         mismatch_type: 'work_order',
-        message: `Work Order Mismatch! 5-Digit Barcode '${barcodeScanned}' is signed for Work Order '${mWo}', but selected Work Order is '${woVal}'.`,
+        message: `🚨 Work Order Mismatch! Scanned Barcode '${barcodeScanned}' belongs to Work Order '${mWo}', but system detected Work Order is '${detectedWo}'.`,
         machine_spec: machineSpec,
-        lot_spec: { needles: lotNeedles, shade, work_order: woVal }
+        lot_spec: lotSpec
       };
     }
 
+    // 2. Strict Shade Match
+    const cMShade = clean(mShade);
+    const cSysShade = clean(detectedShade);
+    if (cMShade && cSysShade && cMShade !== cSysShade) {
+      return {
+        success: false,
+        mismatch_type: 'shade',
+        message: `🚨 Fabric Shade Mismatch! Scanned Barcode '${barcodeScanned}' has Shade '${mShade}', but system detected Shade is '${detectedShade}'.`,
+        machine_spec: machineSpec,
+        lot_spec: lotSpec
+      };
+    }
+
+    // 3. Strict Needles Match
+    const cMNeedles = clean(mNeedles);
+    const cSysNeedles = clean(detectedNeedles);
+    if (cMNeedles !== cSysNeedles) {
+      return {
+        success: false,
+        mismatch_type: 'needles',
+        message: `🚨 Needles Specification Mismatch! Scanned Barcode '${barcodeScanned}' has Needles '${mNeedles}', but selected Lot requires '${detectedNeedles}'.`,
+        machine_spec: machineSpec,
+        lot_spec: lotSpec
+      };
+    }
+
+    // All 3 Match! Mark as successful and proceed
     const currentJobFull = mAssignment.job_full_text || `Job-1/${woVal}`;
 
     // 3. Check if target roll already exists for Merge

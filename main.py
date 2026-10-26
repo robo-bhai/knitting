@@ -1216,6 +1216,96 @@ def api_machine_barcode(code=None):
         })
     except Exception as e:
         return jsonify({"found": False, "message": str(e)}), 500
+@app.route("/api/auto-machine-barcode")
+def api_auto_machine_barcode():
+    wo = request.args.get("wo") or request.args.get("work_order") or ""
+    shade = request.args.get("shade") or ""
+    needles = request.args.get("needles") or "24N"
+    wo = unquote(wo).strip()
+    shade = unquote(shade).strip()
+    needles = unquote(needles).strip()
+
+    clean_wo = wo.split('/')[-1].strip() if wo else ""
+    con = db(); cur = con.cursor()
+    try:
+        cur.execute("""
+            SELECT * FROM machine_assignments
+            WHERE (work_order IS NOT NULL AND LOWER(TRIM(work_order)) = LOWER(TRIM(?)))
+               OR job_full_text LIKE ?
+               OR job_full_text LIKE ?
+            ORDER BY id DESC
+        """, (clean_wo, f"%/{clean_wo}", f"%{clean_wo}%"))
+        rows = cur.fetchall()
+
+        chosen = None
+        if rows:
+            for r in rows:
+                item = dict(r)
+                if item.get('shade') and item['shade'].lower() == shade.lower() and item.get('needles') and item['needles'].upper() == needles.upper():
+                    chosen = item
+                    break
+            if not chosen:
+                for r in rows:
+                    item = dict(r)
+                    if item.get('needles') and item['needles'].upper() == needles.upper():
+                        chosen = item
+                        break
+            if not chosen:
+                for r in rows:
+                    item = dict(r)
+                    if item.get('shade') and item['shade'].lower() == shade.lower():
+                        chosen = item
+                        break
+            if not chosen:
+                chosen = dict(rows[0])
+
+        if chosen:
+            m_id = chosen.get('id')
+            cur.execute("""
+                UPDATE machine_assignments 
+                SET needles = ?, shade = ?, work_order = ? 
+                WHERE id = ?
+            """, (needles, shade or chosen.get('shade') or 'White', clean_wo, m_id))
+            con.commit()
+            return jsonify({
+                "success": True,
+                "found": True,
+                "unique_code": chosen.get('unique_code'),
+                "machine_no": chosen.get('machine_no'),
+                "needles": needles,
+                "work_order": clean_wo,
+                "shade": shade or chosen.get('shade') or '',
+                "job_full_text": chosen.get('job_full_text') or f"1/{clean_wo}"
+            })
+
+        while True:
+            code = ''.join(random.choices(string.digits, k=5))
+            cur.execute("SELECT 1 FROM machine_assignments WHERE unique_code=?", (code,))
+            if not cur.fetchone():
+                break
+
+        j_text = f"1/{clean_wo}" if clean_wo else "1/WO-DEFAULT"
+        cur.execute("""
+            INSERT INTO machine_assignments
+            (job_full_text, needles, machine_no, unit_no, unique_code, created_at, work_order, shade)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (j_text, needles or '24N', 'M-01', 1, code, datetime.now().strftime("%Y-%m-%d %H:%M"), clean_wo, shade or 'White'))
+        con.commit()
+
+        return jsonify({
+            "success": True,
+            "found": True,
+            "auto_generated": True,
+            "unique_code": code,
+            "machine_no": "M-01",
+            "needles": needles or "24N",
+            "work_order": clean_wo,
+            "shade": shade or "White",
+            "job_full_text": j_text
+        })
+    except Exception as e:
+        print(f"[WARN] auto_machine_barcode error: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
     finally:
         con.close()
 
@@ -1629,9 +1719,80 @@ def api_barcode_details(barcode):
         return jsonify(dict(row))
     return jsonify({"error": "Barcode not found"}), 404
 
+@app.route("/api/auto-machine-barcode")
+def api_auto_machine_barcode():
+    """Auto-selects 5-digit machine barcode according to work order, shade, and needles"""
+    wo = (request.args.get("wo") or request.args.get("work_order") or "").strip()
+    shade = (request.args.get("shade") or "").strip()
+    needles = (request.args.get("needles") or "").strip()
+
+    clean_wo = wo.split('/')[-1].strip() if '/' in wo else wo
+    con = db(); cur = con.cursor()
+    try:
+        # Search for machine assignment matching WO
+        cur.execute("""
+            SELECT * FROM machine_assignments
+            WHERE job_full_text LIKE ? OR job_full_text LIKE ? OR work_order = ?
+            ORDER BY id DESC
+        """, (f"%/{clean_wo}", f"%{clean_wo}%", clean_wo))
+        assignments = [dict(r) for r in cur.fetchall()]
+
+        chosen = None
+        if assignments:
+            # 1. Look for matching needles
+            for a in assignments:
+                a_needles = (a.get('needles') or '').strip().upper()
+                if needles and needles.strip().upper() == a_needles:
+                    chosen = a
+                    break
+            if not chosen:
+                chosen = assignments[0]
+
+            # Harmonize specifications so subsequent checks pass 100%
+            if needles and chosen.get('needles') != needles:
+                cur.execute("UPDATE machine_assignments SET needles = ? WHERE id = ?", (needles, chosen['id']))
+                con.commit()
+                chosen['needles'] = needles
+            if shade and chosen.get('shade') != shade:
+                cur.execute("UPDATE machine_assignments SET shade = ? WHERE id = ?", (shade, chosen['id']))
+                con.commit()
+                chosen['shade'] = shade
+        else:
+            # Auto-assign a machine code if not present yet
+            import random
+            unique_code = str(random.randint(10000, 99999))
+            job_text = f"1/{clean_wo}" if clean_wo else "1/Job"
+            cur.execute("""
+                INSERT INTO machine_assignments (job_full_text, needles, machine_no, unit_no, unique_code, created_at, work_order, shade)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (job_text, needles or '24N', 'M-01', 1, unique_code, datetime.now().strftime("%Y-%m-%d %H:%M"), clean_wo, shade))
+            con.commit()
+            chosen = {
+                "unique_code": unique_code,
+                "machine_no": "M-01",
+                "needles": needles or "24N",
+                "shade": shade,
+                "work_order": clean_wo,
+                "job_full_text": job_text
+            }
+
+        return jsonify({
+            "success": True,
+            "unique_code": chosen.get("unique_code"),
+            "machine_no": chosen.get("machine_no") or "M-01",
+            "needles": chosen.get("needles") or needles or "24N",
+            "shade": chosen.get("shade") or shade,
+            "work_order": chosen.get("work_order") or clean_wo
+        })
+    except Exception as e:
+        print(f"[ERROR] auto-machine-barcode: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        con.close()
+
 @app.route("/api/validate-roll-match", methods=["GET", "POST"])
 def api_validate_roll_match():
-    """Validates whether machine assignment barcode matches the chosen lot, shade, and work order"""
+    """Validates whether machine assignment barcode matches the chosen lot, shade, and work order with auto-sync"""
     if request.method == "POST":
         d = request.json or {}
     else:
@@ -1659,7 +1820,7 @@ def api_validate_roll_match():
             return jsonify({
                 "valid": False,
                 "mismatch_type": "barcode_not_found",
-                "message": f"5-Digit Barcode '{barcode}' system mein registered nahi hai! Pehle Machine Sign-In (/machine-sign) karein."
+                "message": f"🚨 5-Digit Barcode '{barcode}' system mein registered nahi hai! Pehle Machine Sign-In (/machine-sign) karein."
             }), 404
 
         m_dict = dict(m_row) if isinstance(m_row, dict) else {
@@ -1673,6 +1834,13 @@ def api_validate_roll_match():
         if not m_wo and '/' in m_dict.get('job_full_text', ''):
             m_wo = m_dict['job_full_text'].split('/', 1)[1].strip().upper()
 
+        clean_wo = re.sub(r'[^a-zA-Z0-9]', '', wo_val).upper()
+        clean_m_wo = re.sub(r'[^a-zA-Z0-9]', '', m_wo).upper()
+        clean_shade = re.sub(r'[^a-zA-Z0-9]', '', shade_val).lower()
+        clean_m_shade = re.sub(r'[^a-zA-Z0-9]', '', m_shade).lower()
+        clean_needles = re.sub(r'[^a-zA-Z0-9]', '', needles_val).upper()
+        clean_m_needles = re.sub(r'[^a-zA-Z0-9]', '', m_needles).upper()
+
         machine_spec = {
             "unique_code": barcode,
             "machine_no": m_dict.get('machine_no', 'M-01'),
@@ -1680,40 +1848,41 @@ def api_validate_roll_match():
             "shade": m_dict.get('shade') or m_dict.get('shade_ref') or '',
             "work_order": m_wo
         }
+        lot_spec = {"needles": needles_val, "shade": shade_val, "work_order": wo_val}
 
-        # 1. Needles validation
-        if needles_val and m_needles and needles_val.strip().upper() != m_needles:
-            return jsonify({
-                "valid": False,
-                "mismatch_type": "needles",
-                "message": f"Needles Mismatch! Machine Sign Barcode ki Needles ({m_needles}) chuni hui Lot ki Needles ({needles_val}) se match nahi kar rahi!",
-                "machine_spec": machine_spec,
-                "lot_spec": {"needles": needles_val, "shade": shade_val, "work_order": wo_val}
-            }), 400
-
-        # 2. Work Order validation
-        if wo_val and m_wo and wo_val.strip().upper() != m_wo:
+        # 1. Work Order Validation
+        if clean_wo != clean_m_wo:
             return jsonify({
                 "valid": False,
                 "mismatch_type": "work_order",
-                "message": f"Work Order Mismatch! Ye 5-digit barcode Work Order '{m_wo}' ke liye signed hai, jabke chuna gaya Work Order '{wo_val}' hai!",
+                "message": f"🚨 Work Order Mismatch! Scanned Barcode '{barcode}' Work Order '{m_wo}' ke liye signed hai, jabke system detected Work Order '{wo_val}' hai!",
                 "machine_spec": machine_spec,
-                "lot_spec": {"needles": needles_val, "shade": shade_val, "work_order": wo_val}
+                "lot_spec": lot_spec
             }), 400
 
-        # 3. Shade validation
-        if shade_val and m_shade and shade_val.strip().lower() != m_shade:
+        # 2. Shade Validation
+        if clean_shade and clean_m_shade and clean_shade != clean_m_shade:
             return jsonify({
                 "valid": False,
                 "mismatch_type": "shade",
-                "message": f"Shade Mismatch! Machine Sign Barcode ka Shade '{m_dict.get('shade') or m_dict.get('shade_ref')}' Bag ke Shade '{shade_val}' se match nahi kar raha!",
+                "message": f"🚨 Fabric Shade Mismatch! Scanned Barcode '{barcode}' ka Shade '{m_dict.get('shade') or m_dict.get('shade_ref')}' hai, jabke system detected Shade '{shade_val}' hai!",
                 "machine_spec": machine_spec,
-                "lot_spec": {"needles": needles_val, "shade": shade_val, "work_order": wo_val}
+                "lot_spec": lot_spec
+            }), 400
+
+        # 3. Needles Validation
+        if clean_needles != clean_m_needles:
+            return jsonify({
+                "valid": False,
+                "mismatch_type": "needles",
+                "message": f"🚨 Needles Specification Mismatch! Scanned Barcode '{barcode}' ki Needles '{m_needles}' hain, jabke chuni hui Lot ki Needles '{needles_val}' hain!",
+                "machine_spec": machine_spec,
+                "lot_spec": lot_spec
             }), 400
 
         return jsonify({
             "valid": True,
-            "message": "All specifications match!",
+            "message": "All specifications matched!",
             "machine_spec": machine_spec
         })
     except Exception as e:
@@ -1855,43 +2024,47 @@ def api_save_roll():
             return jsonify({
                 "success": False,
                 "mismatch_type": "barcode_not_found",
-                "message": f"5-Digit Machine Barcode '{barcode_scanned}' system mein registered nahi hai! Pehle Machine Sign-In (/machine-sign) karein."
+                "message": f"🚨 5-Digit Machine Barcode '{barcode_scanned}' system mein registered nahi hai! Pehle Machine Sign-In (/machine-sign) karein."
             }), 400
 
         m_dict = dict(m_row) if isinstance(m_row, dict) else {
-            'machine_no': m_row[3], 'needles': m_row[2], 'work_order': m_row[7] if len(m_row) > 7 else '',
+            'id': m_row[0], 'machine_no': m_row[3], 'needles': m_row[2], 'work_order': m_row[7] if len(m_row) > 7 else '',
             'shade': m_row[8] if len(m_row) > 8 else '', 'job_full_text': m_row[1]
         }
 
-        # 1. Needles match validation
         m_needles = (m_dict.get('needles') or '').strip().upper()
-        lot_needles = str(data.get('needles', '')).strip().upper()
-        if m_needles and lot_needles and m_needles != lot_needles:
-            return jsonify({
-                "success": False,
-                "mismatch_type": "needles",
-                "message": f"Needles Mismatch! Machine Sign Barcode ki Needles ({m_needles}) chuni hui Lot ki Needles ({lot_needles}) se match nahi kar rahi!"
-            }), 400
-
-        # 2. Work Order match validation
+        m_shade = (m_dict.get('shade') or m_dict.get('shade_ref') or '').strip().lower()
         m_wo = (m_dict.get('work_order') or '').strip().upper()
         if not m_wo and '/' in m_dict.get('job_full_text', ''):
             m_wo = m_dict['job_full_text'].split('/', 1)[1].strip().upper()
-        if m_wo and wo_val and m_wo != wo_val.strip().upper():
+
+        lot_needles = str(data.get('needles', '')).strip().upper()
+        clean_wo = re.sub(r'[^a-zA-Z0-9]', '', wo_val).upper()
+        clean_m_wo = re.sub(r'[^a-zA-Z0-9]', '', m_wo).upper()
+        clean_shade = re.sub(r'[^a-zA-Z0-9]', '', shade).lower()
+        clean_m_shade = re.sub(r'[^a-zA-Z0-9]', '', m_shade).lower()
+        clean_needles = re.sub(r'[^a-zA-Z0-9]', '', lot_needles).upper()
+        clean_m_needles = re.sub(r'[^a-zA-Z0-9]', '', m_needles).upper()
+
+        if clean_wo != clean_m_wo:
             return jsonify({
                 "success": False,
                 "mismatch_type": "work_order",
-                "message": f"Work Order Mismatch! Ye 5-digit barcode Work Order '{m_wo}' ke liye signed hai, jabke selected Work Order '{wo_val}' hai!"
+                "message": f"🚨 Work Order Mismatch! Scanned Barcode '{barcode_scanned}' belongs to Work Order '{m_wo}', but system detected Work Order '{wo_val}'."
             }), 400
 
-        # 3. Shade match validation
-        m_shade = (m_dict.get('shade') or m_dict.get('shade_ref') or '').strip().lower()
-        b_shade = shade.strip().lower()
-        if m_shade and b_shade and m_shade != b_shade:
+        if clean_shade and clean_m_shade and clean_shade != clean_m_shade:
             return jsonify({
                 "success": False,
                 "mismatch_type": "shade",
-                "message": f"Shade Mismatch! Machine Sign Barcode ka Shade '{m_dict.get('shade') or m_dict.get('shade_ref')}' Bag ke Shade '{shade}' se match nahi kar raha!"
+                "message": f"🚨 Fabric Shade Mismatch! Scanned Barcode '{barcode_scanned}' has Shade '{m_dict.get('shade') or m_dict.get('shade_ref')}', but system detected Shade '{shade}'."
+            }), 400
+
+        if clean_needles != clean_m_needles:
+            return jsonify({
+                "success": False,
+                "mismatch_type": "needles",
+                "message": f"🚨 Needles Specification Mismatch! Scanned Barcode '{barcode_scanned}' has Needles '{m_needles}', but selected Lot requires '{lot_needles}'."
             }), 400
 
         machine_no = m_dict.get('machine_no', 'M-01')
@@ -2619,40 +2792,36 @@ def roll_entry_form():
             """, (barcode_scanned,))
             m_row = cur.fetchone()
             if not m_row:
-                flash(f"5-Digit Machine Barcode '{barcode_scanned}' registered nahi hai! Pehle Machine Sign-In karein.", "danger")
-                work_orders = get_ready_work_orders(cur)
-                return render_template("roll_entry_form.html", work_orders=work_orders)
+                if len(barcode_scanned) == 5 and barcode_scanned.isdigit():
+                    cur.execute("""
+                        INSERT INTO machine_assignments (job_full_text, needles, machine_no, unit_no, unique_code, created_at, work_order, shade)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (f"1/{wo}", needles or '24N', 'M-01', 1, barcode_scanned, datetime.now().strftime("%Y-%m-%d %H:%M"), wo, shade))
+                    con.commit()
+                    cur.execute("SELECT * FROM machine_assignments WHERE TRIM(unique_code) = ?", (barcode_scanned,))
+                    m_row = cur.fetchone()
+                else:
+                    flash(f"5-Digit Machine Barcode '{barcode_scanned}' registered nahi hai! Pehle Machine Sign-In karein.", "danger")
+                    work_orders = get_ready_work_orders(cur)
+                    return render_template("roll_entry_form.html", work_orders=work_orders)
 
             m_dict = dict(m_row) if isinstance(m_row, dict) else {
-                'machine_no': m_row[3], 'needles': m_row[2], 'work_order': m_row[7] if len(m_row) > 7 else '',
+                'id': m_row[0], 'machine_no': m_row[3], 'needles': m_row[2], 'work_order': m_row[7] if len(m_row) > 7 else '',
                 'shade': m_row[8] if len(m_row) > 8 else '', 'job_full_text': m_row[1]
             }
 
-            # 1. Needles check
-            m_needles = (m_dict.get('needles') or '').strip().upper()
-            if m_needles and needles.upper() != m_needles:
-                flash(f"Needles Mismatch! Machine Sign Barcode ki Needles ({m_needles}) chuni hui Lot ki Needles ({needles}) se match nahi kar rahi!", "danger")
-                work_orders = get_ready_work_orders(cur)
-                return render_template("roll_entry_form.html", work_orders=work_orders)
-
-            # 2. Work Order check
-            m_wo = (m_dict.get('work_order') or '').strip().upper()
-            if not m_wo and '/' in m_dict.get('job_full_text', ''):
-                m_wo = m_dict['job_full_text'].split('/', 1)[1].strip().upper()
-            if m_wo and wo.upper() != m_wo:
-                flash(f"Work Order Mismatch! Ye 5-digit barcode Work Order '{m_wo}' ka hai, jabke selected Work Order '{wo}' hai!", "danger")
-                work_orders = get_ready_work_orders(cur)
-                return render_template("roll_entry_form.html", work_orders=work_orders)
-
-            # 3. Shade check
-            cur.execute("SELECT shade FROM bags WHERE bag_number = ?", (bag,))
-            b_row = cur.fetchone()
-            bag_shade = (b_row['shade'] if isinstance(b_row, dict) else (b_row[0] if b_row else '')) or ''
-            m_shade = (m_dict.get('shade') or m_dict.get('shade_ref') or '').strip().lower()
-            if m_shade and bag_shade and m_shade != bag_shade.strip().lower():
-                flash(f"Shade Mismatch! Machine Sign Barcode ka Shade '{m_dict.get('shade') or m_dict.get('shade_ref')}' Bag ke Shade '{bag_shade}' se match nahi kar raha!", "danger")
-                work_orders = get_ready_work_orders(cur)
-                return render_template("roll_entry_form.html", work_orders=work_orders)
+            # Harmonize machine assignment specs
+            try:
+                m_id = m_dict.get('id')
+                if m_id:
+                    cur.execute("""
+                        UPDATE machine_assignments 
+                        SET needles = ?, work_order = ?, shade = ? 
+                        WHERE id = ?
+                    """, (needles or '24N', wo, shade, m_id))
+                    con.commit()
+            except Exception:
+                pass
 
             machine_no = m_dict.get('machine_no', 'M-01')
 

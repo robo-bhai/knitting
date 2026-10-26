@@ -127,7 +127,7 @@ export const MachineSignView: React.FC = () => {
 
     const jId = selectedJob || '1';
     const jobFullText = `${jId}/${selectedWo}`;
-    const code = assignMachine(jobFullText, needles || '24N', machineNo.trim().toUpperCase(), unitNo);
+    const code = assignMachine(jobFullText, needles || '24N', machineNo.trim().toUpperCase(), unitNo, finalShade, selectedWo);
     setGeneratedCode(code);
   };
 

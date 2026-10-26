@@ -186,7 +186,7 @@ CREATE TABLE `finalized_bags` (
   `created_at` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `bag_number` (`bag_number`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -195,6 +195,7 @@ CREATE TABLE `finalized_bags` (
 
 LOCK TABLES `finalized_bags` WRITE;
 /*!40000 ALTER TABLE `finalized_bags` DISABLE KEYS */;
+INSERT INTO `finalized_bags` VALUES (1,'341028','22398',20,586.5,'Finalized','2026-10-26 13:19');
 /*!40000 ALTER TABLE `finalized_bags` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -630,4 +631,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-10-26 13:18:39
+-- Dump completed on 2026-10-26 13:20:08

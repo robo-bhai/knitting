@@ -2305,6 +2305,38 @@ def roll_quality():
                     """, (b_grade, roll['lot_name'], roll['needles']))
                 con.commit()
 
+                # Auto-check if all rolls for this bag have completed QC; if so, auto-finalize bag!
+                try:
+                    bag_name = str(roll.get('bag_number') or '').strip()
+                    if bag_name:
+                        cur.execute("""
+                            SELECT COUNT(r.id) as total_r,
+                                   COUNT(q.id) as qc_r,
+                                   SUM(CASE WHEN q.grade_a_weight IS NOT NULL AND q.grade_a_weight > 0 THEN q.grade_a_weight ELSE COALESCE(r.weight, 0) END) as tot_weight
+                            FROM fabric_rolls r
+                            LEFT JOIN quality_checks q ON LOWER(TRIM(r.roll_barcode)) = LOWER(TRIM(q.roll_id))
+                            WHERE LOWER(TRIM(r.bag_number)) = LOWER(TRIM(?))
+                        """, (bag_name,))
+                        b_sum = cur.fetchone()
+                        if b_sum:
+                            tot_r = (b_sum['total_r'] if isinstance(b_sum, dict) else b_sum[0]) or 0
+                            qc_r = (b_sum['qc_r'] if isinstance(b_sum, dict) else b_sum[1]) or 0
+                            tot_w = (b_sum['tot_weight'] if isinstance(b_sum, dict) else b_sum[2]) or 0
+                            if tot_r > 0 and tot_r == qc_r:
+                                cur.execute("SELECT id, status FROM finalized_bags WHERE LOWER(TRIM(bag_number)) = LOWER(TRIM(?))", (bag_name,))
+                                fb_exist = cur.fetchone()
+                                if fb_exist:
+                                    cur.execute("UPDATE finalized_bags SET total_rolls=?, total_weight=?, status='Finalized' WHERE id=?", 
+                                                (tot_r, tot_w, fb_exist['id'] if hasattr(fb_exist, 'keys') else fb_exist[0]))
+                                else:
+                                    cur.execute("""
+                                        INSERT INTO finalized_bags (bag_number, work_order, total_rolls, total_weight, status, created_at)
+                                        VALUES (?, ?, ?, ?, 'Finalized', ?)
+                                    """, (bag_name, roll.get('work_order', ''), tot_r, tot_w, datetime.now().strftime("%Y-%m-%d %H:%M")))
+                                con.commit()
+                except Exception as auto_err:
+                    print(f"[WARN] Auto-finalize error in roll_quality: {auto_err}")
+
             sticker = {
                 "bag": roll['bag_number'],
                 "lot": roll['lot_name'],
@@ -2436,30 +2468,47 @@ def print_gate_pass(bag_no):
 def plan_status():
     con = db(); cur = con.cursor()
     if request.method == "POST" and request.form.get("action") == "create_bag":
-        bag_no = request.form.get("bag_number")
-        wo_no = request.form.get("work_order")
-        cur.execute("""
-            SELECT COUNT(r.id) as r_cnt, SUM(COALESCE(q.grade_a_weight, 0)) as total_kg
-            FROM fabric_rolls r
-            LEFT JOIN quality_checks q ON r.roll_barcode = q.roll_id
-            WHERE r.bag_number = ?
-        """, (bag_no,))
-        summary = cur.fetchone()
-        rcnt = (summary['r_cnt'] if isinstance(summary, dict) else summary[0]) or 0
-        tkg = (summary['total_kg'] if isinstance(summary, dict) else summary[1]) or 0
-
-        if rcnt > 0:
+        bag_no = (request.form.get("bag_number") or "").strip()
+        wo_no = (request.form.get("work_order") or "").strip()
+        try:
             cur.execute("""
-                INSERT INTO finalized_bags (bag_number, work_order, total_rolls, total_weight, status, created_at)
-                VALUES (?, ?, ?, ?, 'Finalized', ?)
-            """, (bag_no, wo_no, rcnt, tkg, datetime.now().strftime("%Y-%m-%d %H:%M")))
-            con.commit()
-            flash(f"Bag {bag_no} Finalized!", "success")
+                SELECT COUNT(r.id) as r_cnt, 
+                       SUM(CASE WHEN q.grade_a_weight IS NOT NULL AND q.grade_a_weight > 0 THEN q.grade_a_weight ELSE COALESCE(r.weight, 0) END) as total_kg
+                FROM fabric_rolls r
+                LEFT JOIN quality_checks q ON LOWER(TRIM(r.roll_barcode)) = LOWER(TRIM(q.roll_id))
+                WHERE LOWER(TRIM(r.bag_number)) = LOWER(TRIM(?))
+            """, (bag_no,))
+            summary = cur.fetchone()
+            rcnt = (summary['r_cnt'] if isinstance(summary, dict) else summary[0]) or 0
+            tkg = (summary['total_kg'] if isinstance(summary, dict) else summary[1]) or 0
+
+            if rcnt > 0:
+                cur.execute("SELECT id FROM finalized_bags WHERE LOWER(TRIM(bag_number)) = LOWER(TRIM(?))", (bag_no,))
+                fb_exist = cur.fetchone()
+                if fb_exist:
+                    cur.execute("""
+                        UPDATE finalized_bags 
+                        SET total_rolls = ?, total_weight = ?, status = 'Finalized',
+                            work_order = COALESCE(NULLIF(?, ''), work_order)
+                        WHERE id = ?
+                    """, (rcnt, tkg, wo_no, fb_exist['id'] if hasattr(fb_exist, 'keys') else fb_exist[0]))
+                else:
+                    cur.execute("""
+                        INSERT INTO finalized_bags (bag_number, work_order, total_rolls, total_weight, status, created_at)
+                        VALUES (?, ?, ?, ?, 'Finalized', ?)
+                    """, (bag_no, wo_no, rcnt, tkg, datetime.now().strftime("%Y-%m-%d %H:%M")))
+                con.commit()
+                flash(f"✅ Bag #{bag_no} Finalized & Ready for Dispatch! ({rcnt} rolls, {tkg:.2f} KG)", "success")
+        except Exception as e:
+            con.rollback()
+            flash(f"Error finalizing bag: {str(e)}", "danger")
+        finally:
+            con.close()
         return redirect(url_for('plan_status', work_order=wo_no, bag_number=bag_no))
 
-    selected_wo = request.args.get("work_order", "")
-    selected_bag = request.args.get("bag_number", "")
-    cur.execute("SELECT DISTINCT work_order FROM work_orders")
+    selected_wo = (request.args.get("work_order") or "").strip()
+    selected_bag = (request.args.get("bag_number") or "").strip()
+    cur.execute("SELECT DISTINCT work_order FROM work_orders ORDER BY work_order DESC")
     work_orders = cur.fetchall()
     bags = []
     rolls_data = []
@@ -2472,31 +2521,69 @@ def plan_status():
             SELECT DISTINCT b.bag_number FROM bags b
             JOIN plans p ON b.plan_id = p.id
             JOIN work_orders wo ON p.work_order_id = wo.id
-            WHERE wo.work_order = ?
-        """, (selected_wo,))
+            WHERE LOWER(TRIM(wo.work_order)) = LOWER(TRIM(?))
+            UNION
+            SELECT DISTINCT r.bag_number FROM fabric_rolls r
+            WHERE LOWER(TRIM(r.work_order)) = LOWER(TRIM(?)) AND r.bag_number IS NOT NULL AND r.bag_number != ''
+        """, (selected_wo, selected_wo))
         bags = cur.fetchall()
 
     if selected_bag:
-        cur.execute("SELECT status FROM finalized_bags WHERE bag_number = ?", (selected_bag,))
+        cur.execute("SELECT id, status, total_rolls, total_weight FROM finalized_bags WHERE LOWER(TRIM(bag_number)) = LOWER(TRIM(?))", (selected_bag,))
         fb = cur.fetchone()
         if fb:
-            is_already_finalized = True
-            bag_status = fb['status']
+            st = fb['status'] if hasattr(fb, 'keys') else fb[1]
+            bag_status = st or "Finalized"
+            if bag_status in ('Finalized', 'Dispatched'):
+                is_already_finalized = True
 
         cur.execute("""
-            SELECT r.roll_no, r.roll_barcode, r.weight as pw, r.needles, b.shade,
+            SELECT r.roll_no, r.roll_barcode, r.weight as pw, r.needles, 
+                   COALESCE(b.shade, '') as shade,
                    COALESCE(q.grade_a_weight, 0) as qw, 
                    COALESCE(q.in_store, 0) as in_store, 
-                   q.id as qc_id
+                   q.id as qc_id,
+                   r.work_order
             FROM fabric_rolls r
-            JOIN bags b ON r.bag_number = b.bag_number
-            LEFT JOIN quality_checks q ON r.roll_barcode = q.roll_id
-            WHERE r.bag_number = ?
+            LEFT JOIN bags b ON LOWER(TRIM(r.bag_number)) = LOWER(TRIM(b.bag_number))
+            LEFT JOIN quality_checks q ON LOWER(TRIM(r.roll_barcode)) = LOWER(TRIM(q.roll_id))
+            WHERE LOWER(TRIM(r.bag_number)) = LOWER(TRIM(?))
             ORDER BY r.roll_no ASC
         """, (selected_bag,))
         rolls_data = cur.fetchall()
-        if rolls_data and not is_already_finalized:
-            ready_to_finalize = all(r['qc_id'] is not None for r in rolls_data)
+
+        if rolls_data:
+            all_qc_passed = all(r['qc_id'] is not None for r in rolls_data)
+            ready_to_finalize = all_qc_passed and not is_already_finalized
+
+            # AUTO-FINALIZE BAG IF 100% ROLLS PASSED QUALITY CHECK!
+            if all_qc_passed and not is_already_finalized:
+                try:
+                    tot_rcnt = len(rolls_data)
+                    tot_tkg = sum(float(r['qw'] or r['pw'] or 0) for r in rolls_data)
+                    wo_val = selected_wo or (rolls_data[0]['work_order'] if hasattr(rolls_data[0], 'keys') else '')
+                    
+                    cur.execute("SELECT id FROM finalized_bags WHERE LOWER(TRIM(bag_number)) = LOWER(TRIM(?))", (selected_bag,))
+                    existing_fb = cur.fetchone()
+                    if existing_fb:
+                        cur.execute("""
+                            UPDATE finalized_bags 
+                            SET total_rolls = ?, total_weight = ?, status = 'Finalized',
+                                work_order = COALESCE(NULLIF(?, ''), work_order)
+                            WHERE id = ?
+                        """, (tot_rcnt, tot_tkg, wo_val, existing_fb['id'] if hasattr(existing_fb, 'keys') else existing_fb[0]))
+                    else:
+                        cur.execute("""
+                            INSERT INTO finalized_bags (bag_number, work_order, total_rolls, total_weight, status, created_at)
+                            VALUES (?, ?, ?, ?, 'Finalized', ?)
+                        """, (selected_bag, wo_val, tot_rcnt, tot_tkg, datetime.now().strftime("%Y-%m-%d %H:%M")))
+                    con.commit()
+                    is_already_finalized = True
+                    ready_to_finalize = False
+                    bag_status = "Finalized"
+                    flash(f"🎉 All {tot_rcnt} rolls have passed Quality Inspection! Bag #{selected_bag} is automatically Finalized & Ready for Dispatch.", "success")
+                except Exception as auto_f_err:
+                    print(f"[WARN] Auto finalize in plan_status: {auto_f_err}")
 
     con.close()
     return render_template("plan_status.html", **locals())

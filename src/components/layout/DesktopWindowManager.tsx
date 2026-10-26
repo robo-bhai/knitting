@@ -192,7 +192,7 @@ export const DesktopWindowManager: React.FC<Props> = ({ onToggleClassicMode }) =
       icon: CheckSquare,
       category: 'Planning',
       roles: ['admin', 'manager', 'incharge', 'clerk'],
-      getComponent: () => <PlanStatusView />
+      getComponent: () => <PlanStatusView onGoToDispatch={() => openModuleWindow('dispatch')} />
     },
     {
       id: 'hr_staff',

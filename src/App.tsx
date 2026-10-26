@@ -94,7 +94,7 @@ const MainApp: React.FC = () => {
           {activeTab === 'roll_quality' && <QualityControlView />}
           {activeTab === 'fabric_store' && <FabricStoreView />}
           {activeTab === 'dispatch' && <DispatchView />}
-          {activeTab === 'plan_status' && <PlanStatusView />}
+          {activeTab === 'plan_status' && <PlanStatusView setActiveTab={setActiveTab} />}
           {activeTab === 'search_roll' && <SearchRollView />}
           {activeTab === 'hr_staff' && <HrStaffView onOpenLedger={handleOpenStaffLedger} />}
           {activeTab === 'hr_search' && <HrStaffView onOpenLedger={handleOpenStaffLedger} />}

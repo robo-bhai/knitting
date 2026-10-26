@@ -1028,6 +1028,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
       setQualityChecks(prev => [...prev, newQc]);
 
+      // Auto-check if 100% rolls for this bag have passed QC; if so, automatically finalize bag!
+      try {
+        const cleanBagName = (roll.bag_number || '').split('(')[0].trim().toLowerCase();
+        const bagRolls = rolls.filter(r => (r.bag_number || '').split('(')[0].trim().toLowerCase() === cleanBagName);
+        const allBagDone = bagRolls.length > 0 && bagRolls.every(r => r.roll_barcode === barcode || qualityChecks.some(qc => qc.roll_id === r.roll_barcode));
+        if (allBagDone) {
+          const totalWeight = bagRolls.reduce((sum, r) => {
+            if (r.roll_barcode === barcode) return sum + parsedQw;
+            const q = qualityChecks.find(qc => qc.roll_id === r.roll_barcode);
+            return sum + (q ? q.grade_a_weight : r.weight);
+          }, 0);
+
+          setFinalizedBags(prev => {
+            const exists = prev.find(b => (b.bag_number || '').split('(')[0].trim().toLowerCase() === cleanBagName);
+            if (exists) {
+              return prev.map(b => (b.bag_number || '').split('(')[0].trim().toLowerCase() === cleanBagName
+                ? { ...b, status: 'Finalized', total_rolls: bagRolls.length, total_weight: totalWeight }
+                : b);
+            } else {
+              return [{
+                id: Date.now(),
+                bag_number: roll.bag_number,
+                work_order: roll.work_order,
+                total_rolls: bagRolls.length,
+                total_weight: totalWeight,
+                status: 'Finalized',
+                created_at: new Date().toISOString().replace('T', ' ').substring(0, 16)
+              }, ...prev];
+            }
+          });
+        }
+      } catch (err) {
+        console.warn('Auto finalize on QC error:', err);
+      }
+
       // Restore balance if B-Grade fabric was found
       if (bGrade > 0 && bag) {
         setLots(prev =>
@@ -1119,28 +1154,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Finalize Bag Handler
   const finalizeBag = (bagNumber: string, workOrder: string) => {
-    const bagRolls = rolls.filter(r => r.bag_number === bagNumber);
+    if (!bagNumber) return { success: false, message: 'Bag number is required!' };
+    const cleanBagNo = bagNumber.split('(')[0].trim().toLowerCase();
+    const bagRolls = rolls.filter(r => (r.bag_number || '').split('(')[0].trim().toLowerCase() === cleanBagNo);
     if (bagRolls.length === 0) {
       return { success: false, message: 'No rolls produced for this bag yet!' };
     }
 
-    // Sum grade A weight
+    // Sum grade A weight or roll weight
     let totalKg = 0;
     for (const r of bagRolls) {
       const qc = qualityChecks.find(q => q.roll_id === r.roll_barcode);
-      totalKg += qc ? qc.grade_a_weight : r.weight;
+      totalKg += (qc && qc.grade_a_weight > 0) ? qc.grade_a_weight : r.weight;
     }
 
-    const existing = finalizedBags.find(b => b.bag_number === bagNumber);
+    const effWo = workOrder || bagRolls[0]?.work_order || 'WO-101';
+    const existing = finalizedBags.find(b => (b.bag_number || '').split('(')[0].trim().toLowerCase() === cleanBagNo);
+
     if (existing) {
       setFinalizedBags(prev =>
-        prev.map(b => b.bag_number === bagNumber ? { ...b, status: 'Finalized', total_rolls: bagRolls.length, total_weight: totalKg } : b)
+        prev.map(b => (b.bag_number || '').split('(')[0].trim().toLowerCase() === cleanBagNo
+          ? { ...b, status: 'Finalized', total_rolls: bagRolls.length, total_weight: totalKg, work_order: effWo }
+          : b)
       );
     } else {
       const newFinalized: FinalizedBag = {
         id: Date.now(),
-        bag_number: bagNumber,
-        work_order: workOrder,
+        bag_number: bagRolls[0]?.bag_number || bagNumber,
+        work_order: effWo,
         total_rolls: bagRolls.length,
         total_weight: totalKg,
         status: 'Finalized',
@@ -1149,7 +1190,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setFinalizedBags(prev => [newFinalized, ...prev]);
     }
 
-    showFlash(`Bag ${bagNumber} finalized with ${bagRolls.length} rolls (${totalKg.toFixed(2)} KG)`, 'success');
+    showFlash(`✅ Bag ${bagNumber} finalized with ${bagRolls.length} rolls (${totalKg.toFixed(2)} KG) & Ready for Dispatch!`, 'success');
     return { success: true, message: `Bag ${bagNumber} finalized!` };
   };
 

@@ -1,11 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
   CheckSquare, Download, CheckCircle2, AlertTriangle,
-  Lock, ArrowRight, ShieldCheck, FileSpreadsheet, Eye
+  Lock, ArrowRight, ShieldCheck, FileSpreadsheet, Eye, Truck
 } from 'lucide-react';
 
-export const PlanStatusView: React.FC = () => {
+interface PlanStatusViewProps {
+  setActiveTab?: (tab: string) => void;
+  onGoToDispatch?: () => void;
+}
+
+export const PlanStatusView: React.FC<PlanStatusViewProps> = ({ setActiveTab, onGoToDispatch }) => {
   const {
     workOrders, plans, bags, rolls, qualityChecks, finalizedBags,
     finalizeBag
@@ -14,23 +19,43 @@ export const PlanStatusView: React.FC = () => {
   const [selectedWo, setSelectedWo] = useState<string>(workOrders[0]?.work_order || '');
   const [selectedBag, setSelectedBag] = useState<string>('');
 
-  // Available bags for selected WO
-  const woObj = workOrders.find(w => w.work_order === selectedWo);
-  const woPlans = woObj ? plans.filter(p => p.work_order_id === woObj.id) : [];
-  const availableBags = bags.filter(b => woPlans.some(p => p.id === b.plan_id));
+  // Available bags for selected WO (from both PPC plans & actual fabric rolls)
+  const woObj = workOrders.find(w => w.work_order.trim().toLowerCase() === selectedWo.trim().toLowerCase());
+  const woPlans = woObj ? plans.filter(p => p.work_order_id === woObj.id || String(p.work_order_id) === String(woObj.id)) : [];
+  const ppcBags = bags.filter(b => woPlans.some(p => p.id === b.plan_id || String(p.id) === String(b.plan_id)));
+
+  const rollBags = Array.from(new Set(
+    rolls.filter(r => (r.work_order || '').trim().toLowerCase() === selectedWo.trim().toLowerCase())
+         .map(r => r.bag_number)
+  )).filter(b => !ppcBags.some(pb => pb.bag_number.trim().toLowerCase() === b.trim().toLowerCase()));
+
+  const allAvailableBags = [
+    ...ppcBags.map(b => ({ bag_number: b.bag_number, shade: b.shade })),
+    ...rollBags.map(b => ({ bag_number: b, shade: 'Production' }))
+  ];
+
+  // Clean bag name for robust case/trim matching
+  const cleanBag = selectedBag.split('(')[0].trim().toLowerCase();
 
   // Rolls data for selected bag
   const bagRolls = selectedBag
-    ? rolls.filter(r => r.bag_number === selectedBag).sort((a, b) => a.roll_no - b.roll_no)
+    ? rolls.filter(r => (r.bag_number || '').split('(')[0].trim().toLowerCase() === cleanBag).sort((a, b) => a.roll_no - b.roll_no)
     : [];
 
-  const finalizedRecord = finalizedBags.find(fb => fb.bag_number === selectedBag);
-  const isAlreadyFinalized = !!finalizedRecord;
+  const finalizedRecord = finalizedBags.find(fb => (fb.bag_number || '').split('(')[0].trim().toLowerCase() === cleanBag);
+  const isAlreadyFinalized = Boolean(finalizedRecord && (finalizedRecord.status === 'Finalized' || finalizedRecord.status === 'Dispatched'));
   const bagStatus = finalizedRecord?.status || 'Pending';
 
   // Check if all rolls have a quality check
-  const allQcDone = bagRolls.length > 0 && bagRolls.every(r => qualityChecks.some(qc => qc.roll_id === r.roll_barcode));
+  const allQcDone = bagRolls.length > 0 && bagRolls.every(r => qualityChecks.some(qc => qc.roll_id.trim().toLowerCase() === r.roll_barcode.trim().toLowerCase()));
   const readyToFinalize = allQcDone && !isAlreadyFinalized;
+
+  // Auto-finalize bag as soon as all rolls are Quality Checked!
+  useEffect(() => {
+    if (readyToFinalize && selectedBag) {
+      finalizeBag(selectedBag, selectedWo);
+    }
+  }, [readyToFinalize, selectedBag, selectedWo, finalizeBag]);
 
   const totalPw = bagRolls.reduce((sum, r) => sum + r.weight, 0);
   const totalQw = bagRolls.reduce((sum, r) => {
@@ -137,8 +162,8 @@ export const PlanStatusView: React.FC = () => {
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
             >
               <option value="">-- Choose Bag Number --</option>
-              {availableBags.map(b => (
-                <option key={b.id} value={b.bag_number}>
+              {allAvailableBags.map((b, idx) => (
+                <option key={idx} value={b.bag_number}>
                   {b.bag_number} ({b.shade})
                 </option>
               ))}
@@ -149,15 +174,15 @@ export const PlanStatusView: React.FC = () => {
         {/* Status banner when bag is picked */}
         {selectedBag && (
           <div className="mt-4 pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <span className={`px-2.5 py-1 rounded text-xs font-bold uppercase tracking-wider ${
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${
                 bagStatus === 'Dispatched'
-                  ? 'bg-amber-100 text-amber-900'
+                  ? 'bg-amber-100 text-amber-900 border-amber-300'
                   : isAlreadyFinalized
-                  ? 'bg-blue-100 text-blue-900'
-                  : 'bg-slate-100 text-slate-700'
+                  ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                  : 'bg-slate-100 text-slate-700 border-slate-300'
               }`}>
-                Bag Status: {bagStatus}
+                Status: {bagStatus}
               </span>
 
               <div className="text-xs text-slate-600 font-mono">
@@ -169,14 +194,29 @@ export const PlanStatusView: React.FC = () => {
 
             {/* Finalization Action Button */}
             {isAlreadyFinalized ? (
-              <span className="text-xs text-slate-500 flex items-center gap-1.5 font-medium">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                Bag already finalized on {finalizedRecord?.created_at}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-emerald-800 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200 flex items-center gap-1.5 font-bold">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  Bag Finalized &amp; Ready for Dispatch ({finalizedRecord?.total_rolls || bagRolls.length} Rolls)
+                </span>
+                {(onGoToDispatch || setActiveTab) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onGoToDispatch) onGoToDispatch();
+                      else if (setActiveTab) setActiveTab('dispatch');
+                    }}
+                    className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-lg text-xs font-bold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Truck className="w-3.5 h-3.5" />
+                    <span>Go to Dispatch</span>
+                  </button>
+                )}
+              </div>
             ) : readyToFinalize ? (
               <button
                 onClick={handleFinalize}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-2 shadow-sm transition-colors"
+                className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-2 shadow-sm transition-all cursor-pointer border border-emerald-800"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 Finalize Bag ({bagRolls.length} Rolls)
@@ -184,7 +224,9 @@ export const PlanStatusView: React.FC = () => {
             ) : (
               <span className="text-xs text-amber-800 bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200 flex items-center gap-1.5 font-medium">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                All rolls must pass Quality Inspection before finalization!
+                <span>
+                  {bagRolls.filter(r => qualityChecks.some(qc => qc.roll_id.trim().toLowerCase() === r.roll_barcode.trim().toLowerCase())).length} of {bagRolls.length} rolls passed QC.
+                </span>
               </span>
             )}
           </div>

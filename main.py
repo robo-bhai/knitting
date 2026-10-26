@@ -3,7 +3,7 @@ TexFlow Industrial Garment ERP - Backend System (GarmentFlow Pro)
 Supports SQLite & MySQL Dual-Engine Architecture with Automatic Schema Repair
 """
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, send_file
-import os, sys, time, random, string, io
+import os, sys, time, random, string, io, re
 from datetime import datetime
 from functools import wraps
 from urllib.parse import unquote
@@ -2714,6 +2714,7 @@ def roll_entry_form():
             wo = d.get("work_order", "").strip()
             plan = d.get("plan_id", "").strip()
             bag = d.get("bag", "").strip()
+            shade = d.get("shade", "").strip()
             lot = d.get("lot", "").strip()
             weight = float(d.get("weight", 0) or 0)
             tube = d.get("tube", "").strip()

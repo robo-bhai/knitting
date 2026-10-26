@@ -369,7 +369,7 @@ CREATE TABLE `machine_assignments` (
   `shade` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `unique_code` (`unique_code`)
-) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -378,7 +378,7 @@ CREATE TABLE `machine_assignments` (
 
 LOCK TABLES `machine_assignments` WRITE;
 /*!40000 ALTER TABLE `machine_assignments` DISABLE KEYS */;
-INSERT INTO `machine_assignments` VALUES (10,'2/22398','1512','7',1,'82561','2026-10-26 05:36','22398','Navy Blue');
+INSERT INTO `machine_assignments` VALUES (10,'2/22398','2660','7',1,'82561','2026-10-26 05:36','22398','Navy Blue'),(11,'1/1','2660','99',3,'12673','2026-10-26 05:39','1','Red');
 /*!40000 ALTER TABLE `machine_assignments` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -628,4 +628,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-10-26  5:39:27
+-- Dump completed on 2026-10-26  5:40:29

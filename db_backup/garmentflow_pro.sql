@@ -132,7 +132,7 @@ CREATE TABLE `fabric_rolls` (
   `is_merged` int DEFAULT '0',
   `merge_count` int DEFAULT '0',
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -141,7 +141,7 @@ CREATE TABLE `fabric_rolls` (
 
 LOCK TABLES `fabric_rolls` WRITE;
 /*!40000 ALTER TABLE `fabric_rolls` DISABLE KEYS */;
-INSERT INTO `fabric_rolls` VALUES (1,'22398','22188','341028','LoT-X',1,22.6,'T-101','2660','2026-10-26 08:16','46392','R-341028-01','19',0,0);
+INSERT INTO `fabric_rolls` VALUES (1,'22398','22188','341028','LoT-X',1,22.6,'T-101','2660','2026-10-26 08:16','46392','R-341028-01','19',0,0),(2,'22398','22188','341028','LoT-X',2,33.6,'T-102','2660','2026-10-26 08:16','46392','R-341028-02','19',0,0);
 /*!40000 ALTER TABLE `fabric_rolls` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -347,7 +347,7 @@ CREATE TABLE `lots` (
 
 LOCK TABLES `lots` WRITE;
 /*!40000 ALTER TABLE `lots` DISABLE KEYS */;
-INSERT INTO `lots` VALUES (1,1,'LoT-X',72,177.4,200,200,'2660',1,'','2026-10-26');
+INSERT INTO `lots` VALUES (1,1,'LoT-X',72,143.8,200,200,'2660',1,'','2026-10-26');
 /*!40000 ALTER TABLE `lots` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -476,7 +476,7 @@ CREATE TABLE `quality_checks` (
   `checked_at` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `roll_id` (`roll_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -485,6 +485,7 @@ CREATE TABLE `quality_checks` (
 
 LOCK TABLES `quality_checks` WRITE;
 /*!40000 ALTER TABLE `quality_checks` DISABLE KEYS */;
+INSERT INTO `quality_checks` VALUES (1,'R-341028-02',33.6,33.6,0,0,'2026-10-26 08:17');
 /*!40000 ALTER TABLE `quality_checks` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -629,4 +630,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-10-26  8:16:18
+-- Dump completed on 2026-10-26  8:17:20

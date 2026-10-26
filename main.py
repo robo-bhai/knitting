@@ -150,7 +150,27 @@ def db():
     import sqlite3
     con = sqlite3.connect(SQLITE_DB)
     con.row_factory = sqlite3.Row
+    def sqlite_concat(*args):
+        return ''.join(str(a) for a in args if a is not None)
+    con.create_function("CONCAT", -1, sqlite_concat)
     return con
+
+def to_dict(row):
+    """Safely converts any DB row (sqlite3.Row, dict, tuple) to a dict"""
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return row
+    if hasattr(row, 'keys'):
+        return dict(row)
+    if isinstance(row, (list, tuple)):
+        keys = ['id', 'job_full_text', 'needles', 'machine_no', 'unit_no', 'unique_code', 'created_at', 'work_order', 'shade']
+        d = {}
+        for i, val in enumerate(row):
+            if i < len(keys):
+                d[keys[i]] = val
+        return d
+    return row
 
 # ================= AUTOMATIC SCHEMA REPAIR & MIGRATION =================
 def repair_and_migrate_db():
@@ -1135,7 +1155,7 @@ def get_ready_work_orders(cur):
             WHERE m.unique_code IS NOT NULL AND LENGTH(TRIM(m.unique_code)) = 5
             ORDER BY wo.work_order DESC
         """)
-        ready = [r['work_order'] if isinstance(r, dict) else r[0] for r in cur.fetchall() if (r['work_order'] if isinstance(r, dict) else r[0])]
+        ready = [to_dict(r).get('work_order') for r in cur.fetchall() if to_dict(r).get('work_order')]
 
         # Also include all work orders that have plans created in PPC
         cur.execute("""
@@ -1179,12 +1199,10 @@ def api_machine_barcode(code=None):
     con = db(); cur = con.cursor()
     try:
         cur.execute("""
-            SELECT m.*, j.shade_ref
-            FROM machine_assignments m
-            LEFT JOIN jobs j ON m.job_full_text LIKE CONCAT('%', j.job, '%')
-            WHERE TRIM(m.unique_code) = ?
-            ORDER BY m.id DESC LIMIT 1
-        """, (code,))
+            SELECT * FROM machine_assignments
+            WHERE TRIM(unique_code) = ? OR unique_code = ?
+            ORDER BY id DESC LIMIT 1
+        """, (code, code))
         row = cur.fetchone()
         if not row:
             return jsonify({
@@ -1192,30 +1210,37 @@ def api_machine_barcode(code=None):
                 "message": f"5-Digit Barcode '{code}' registered nahi hai! Pehle Machine Sign-In (/machine-sign) karein."
             }), 404
 
-        item = dict(row) if isinstance(row, dict) else {
-            'id': row[0], 'job_full_text': row[1], 'needles': row[2], 'machine_no': row[3],
-            'unit_no': row[4], 'unique_code': row[5], 'created_at': row[6],
-            'work_order': row[7] if len(row) > 7 else '', 'shade': row[8] if len(row) > 8 else ''
-        }
+        item = to_dict(row)
+        wo = item.get('work_order') or ''
+        if not wo and item.get('job_full_text') and '/' in str(item['job_full_text']):
+            wo = str(item['job_full_text']).split('/', 1)[1].strip()
 
-        wo = item.get('work_order')
-        if not wo and item.get('job_full_text') and '/' in item['job_full_text']:
-            wo = item['job_full_text'].split('/', 1)[1].strip()
-
-        shade = item.get('shade') or item.get('shade_ref') or ''
+        shade = item.get('shade') or ''
+        if not shade and wo:
+            try:
+                cur.execute("SELECT shade_ref FROM jobs WHERE work_order_ref = ? LIMIT 1", (wo,))
+                j_row = cur.fetchone()
+                if j_row:
+                    shade = (to_dict(j_row).get('shade_ref') or '').strip()
+            except Exception:
+                pass
 
         return jsonify({
             "found": True,
-            "unique_code": item.get('unique_code'),
+            "unique_code": str(item.get('unique_code') or code),
             "machine_no": item.get('machine_no'),
             "unit_no": item.get('unit_no'),
             "needles": item.get('needles'),
             "work_order": wo or '',
-            "shade": shade,
-            "job_full_text": item.get('job_full_text')
+            "shade": shade or '',
+            "job_full_text": item.get('job_full_text') or ''
         })
     except Exception as e:
+        print(f"[ERROR] api_machine_barcode: {e}")
         return jsonify({"found": False, "message": str(e)}), 500
+    finally:
+        con.close()
+
 @app.route("/api/auto-machine-barcode")
 def api_auto_machine_barcode():
     wo = request.args.get("wo") or request.args.get("work_order") or ""
@@ -1240,24 +1265,24 @@ def api_auto_machine_barcode():
         chosen = None
         if rows:
             for r in rows:
-                item = dict(r)
+                item = to_dict(r)
                 if item.get('shade') and item['shade'].lower() == shade.lower() and item.get('needles') and item['needles'].upper() == needles.upper():
                     chosen = item
                     break
             if not chosen:
                 for r in rows:
-                    item = dict(r)
+                    item = to_dict(r)
                     if item.get('needles') and item['needles'].upper() == needles.upper():
                         chosen = item
                         break
             if not chosen:
                 for r in rows:
-                    item = dict(r)
+                    item = to_dict(r)
                     if item.get('shade') and item['shade'].lower() == shade.lower():
                         chosen = item
                         break
             if not chosen:
-                chosen = dict(rows[0])
+                chosen = to_dict(rows[0])
 
         if chosen:
             m_id = chosen.get('id')
@@ -1738,12 +1763,10 @@ def api_validate_roll_match():
     con = db(); cur = con.cursor()
     try:
         cur.execute("""
-            SELECT m.*, j.shade_ref
-            FROM machine_assignments m
-            LEFT JOIN jobs j ON m.job_full_text LIKE CONCAT('%', j.job, '%')
-            WHERE TRIM(m.unique_code) = ?
-            ORDER BY m.id DESC LIMIT 1
-        """, (barcode,))
+            SELECT * FROM machine_assignments
+            WHERE TRIM(unique_code) = ? OR unique_code = ?
+            ORDER BY id DESC LIMIT 1
+        """, (barcode, barcode))
         m_row = cur.fetchone()
         if not m_row:
             return jsonify({
@@ -1752,10 +1775,7 @@ def api_validate_roll_match():
                 "message": f"🚨 5-Digit Barcode '{barcode}' system mein registered nahi hai! Pehle Machine Sign-In (/machine-sign) karein."
             }), 404
 
-        m_dict = dict(m_row) if isinstance(m_row, dict) else {
-            'machine_no': m_row[3], 'needles': m_row[2], 'work_order': m_row[7] if len(m_row) > 7 else '',
-            'shade': m_row[8] if len(m_row) > 8 else '', 'job_full_text': m_row[1]
-        }
+        m_dict = to_dict(m_row)
 
         m_needles = (m_dict.get('needles') or '').strip().upper()
         m_shade = (m_dict.get('shade') or m_dict.get('shade_ref') or '').strip().lower()
@@ -1942,12 +1962,10 @@ def api_save_roll():
             return jsonify({"success": False, "message": "5-Digit Machine Barcode is required!"}), 400
 
         cur.execute("""
-            SELECT m.*, j.shade_ref
-            FROM machine_assignments m
-            LEFT JOIN jobs j ON m.job_full_text LIKE CONCAT('%', j.job, '%')
-            WHERE TRIM(m.unique_code) = ?
-            ORDER BY m.id DESC LIMIT 1
-        """, (barcode_scanned,))
+            SELECT * FROM machine_assignments
+            WHERE TRIM(unique_code) = ? OR unique_code = ?
+            ORDER BY id DESC LIMIT 1
+        """, (barcode_scanned, barcode_scanned))
         m_row = cur.fetchone()
         if not m_row:
             return jsonify({
@@ -1956,10 +1974,7 @@ def api_save_roll():
                 "message": f"🚨 5-Digit Machine Barcode '{barcode_scanned}' system mein registered nahi hai! Pehle Machine Sign-In (/machine-sign) karein."
             }), 400
 
-        m_dict = dict(m_row) if isinstance(m_row, dict) else {
-            'id': m_row[0], 'machine_no': m_row[3], 'needles': m_row[2], 'work_order': m_row[7] if len(m_row) > 7 else '',
-            'shade': m_row[8] if len(m_row) > 8 else '', 'job_full_text': m_row[1]
-        }
+        m_dict = to_dict(m_row)
 
         m_needles = (m_dict.get('needles') or '').strip().upper()
         m_shade = (m_dict.get('shade') or m_dict.get('shade_ref') or '').strip().lower()
@@ -2713,12 +2728,10 @@ def roll_entry_form():
 
             # Verify Machine Assignment
             cur.execute("""
-                SELECT m.*, j.shade_ref
-                FROM machine_assignments m
-                LEFT JOIN jobs j ON m.job_full_text LIKE CONCAT('%', j.job, '%')
-                WHERE TRIM(m.unique_code) = ?
-                ORDER BY m.id DESC LIMIT 1
-            """, (barcode_scanned,))
+                SELECT * FROM machine_assignments
+                WHERE TRIM(unique_code) = ? OR unique_code = ?
+                ORDER BY id DESC LIMIT 1
+            """, (barcode_scanned, barcode_scanned))
             m_row = cur.fetchone()
             if not m_row:
                 if len(barcode_scanned) == 5 and barcode_scanned.isdigit():
@@ -2727,17 +2740,14 @@ def roll_entry_form():
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, (f"1/{wo}", needles or '24N', 'M-01', 1, barcode_scanned, datetime.now().strftime("%Y-%m-%d %H:%M"), wo, shade))
                     con.commit()
-                    cur.execute("SELECT * FROM machine_assignments WHERE TRIM(unique_code) = ?", (barcode_scanned,))
+                    cur.execute("SELECT * FROM machine_assignments WHERE TRIM(unique_code) = ? OR unique_code = ?", (barcode_scanned, barcode_scanned))
                     m_row = cur.fetchone()
                 else:
                     flash(f"5-Digit Machine Barcode '{barcode_scanned}' registered nahi hai! Pehle Machine Sign-In karein.", "danger")
                     work_orders = get_ready_work_orders(cur)
                     return render_template("roll_entry_form.html", work_orders=work_orders)
 
-            m_dict = dict(m_row) if isinstance(m_row, dict) else {
-                'id': m_row[0], 'machine_no': m_row[3], 'needles': m_row[2], 'work_order': m_row[7] if len(m_row) > 7 else '',
-                'shade': m_row[8] if len(m_row) > 8 else '', 'job_full_text': m_row[1]
-            }
+            m_dict = to_dict(m_row)
 
             # Harmonize machine assignment specs
             try:
@@ -2820,20 +2830,16 @@ def view_barcode():
     con = db(); cur = con.cursor()
     if search_query:
         cur.execute("""
-            SELECT m.*, j.shade_ref
-            FROM machine_assignments m
-            LEFT JOIN jobs j ON m.job_full_text LIKE CONCAT('%', j.job, '%')
-            WHERE m.job_full_text LIKE ?
-            ORDER BY m.id DESC
-        """, (f"%{search_query}%",))
+            SELECT * FROM machine_assignments
+            WHERE job_full_text LIKE ? OR work_order LIKE ? OR unique_code LIKE ?
+            ORDER BY id DESC
+        """, (f"%{search_query}%", f"%{search_query}%", f"%{search_query}%"))
     else:
         cur.execute("""
-            SELECT m.*, j.shade_ref
-            FROM machine_assignments m
-            LEFT JOIN jobs j ON m.job_full_text LIKE CONCAT('%', j.job, '%')
-            ORDER BY m.id DESC LIMIT 50
+            SELECT * FROM machine_assignments
+            ORDER BY id DESC LIMIT 50
         """)
-    results = cur.fetchall()
+    results = [to_dict(r) for r in cur.fetchall()]
     con.close()
     return render_template("view_barcode.html", results=results, search_query=search_query)
 

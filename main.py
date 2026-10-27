@@ -834,11 +834,137 @@ def hr_profile(staff_id):
     return render_template("hr/profile.html", s=staff)
 
 # ================= PPC MODULE & TREE VIEW =================
+def extract_5digit_num(val):
+    if not val:
+        return None
+    val_str = str(val).strip()
+    if val_str.isdigit() and len(val_str) == 5:
+        n = int(val_str)
+        return n if n >= 10000 else None
+    match = re.search(r'\b\d{5}\b', val_str)
+    if match:
+        n = int(match.group(0))
+        return n if n >= 10000 else None
+    return None
+
+def get_next_work_order(cur):
+    try:
+        cur.execute("SELECT work_order FROM work_orders")
+        rows = cur.fetchall()
+        max_val = 9999
+        for r in rows:
+            w = r['work_order'] if isinstance(r, dict) else r[0]
+            val = extract_5digit_num(w)
+            if val and val > max_val:
+                max_val = val
+        return str(max_val + 1)
+    except Exception:
+        return "10000"
+
+def get_next_plan_id(cur):
+    try:
+        cur.execute("SELECT plan_id FROM plans")
+        rows = cur.fetchall()
+        max_val = 9999
+        for r in rows:
+            p = r['plan_id'] if isinstance(r, dict) else r[0]
+            val = extract_5digit_num(p)
+            if val and val > max_val:
+                max_val = val
+        return str(max_val + 1)
+    except Exception:
+        return "10000"
+
+def get_next_bag_number(cur):
+    try:
+        cur.execute("SELECT bag_number FROM bags")
+        rows = cur.fetchall()
+        max_val = 9999
+        for r in rows:
+            b = r['bag_number'] if isinstance(r, dict) else r[0]
+            val = extract_5digit_num(b)
+            if val and val > max_val:
+                max_val = val
+        return str(max_val + 1)
+    except Exception:
+        return "10000"
+
+def get_next_lot_name(cur, bag_id):
+    today = datetime.now().strftime("%d-%m-%y")
+    try:
+        cur.execute("SELECT lot_name FROM lots WHERE bag_id = ?", (bag_id,))
+        bag_lots = cur.fetchall()
+        
+        max_letter_code = -1
+        batch_num = "001"
+        
+        for bl in bag_lots:
+            lname = bl['lot_name'] if isinstance(bl, dict) else bl[0]
+            m = re.search(r'(\d{3})([A-Za-z])', lname or '')
+            if m:
+                batch_num = m.group(1)
+                code = ord(m.group(2).upper()) - 65
+                if code > max_letter_code:
+                    max_letter_code = code
+
+        if max_letter_code >= 0:
+            next_code = max_letter_code + 1
+            batch_int = int(batch_num)
+            if next_code >= 26:
+                batch_int += next_code // 26
+                next_code = next_code % 26
+            b_str = str(batch_int).zfill(3)
+            letter = chr(65 + next_code)
+            candidate = f"{today} {b_str}{letter}"
+        else:
+            cur.execute("SELECT lot_name FROM lots")
+            all_lots = cur.fetchall()
+            max_batch = 0
+            for al in all_lots:
+                lname = al['lot_name'] if isinstance(al, dict) else al[0]
+                if lname and today in lname:
+                    m = re.search(r'(\d{3})[A-Za-z]', lname)
+                    if m:
+                        b_val = int(m.group(1))
+                        if b_val > max_batch:
+                            max_batch = b_val
+            next_batch = max_batch + 1
+            b_str = str(next_batch).zfill(3)
+            candidate = f"{today} {b_str}A"
+
+        safety = 0
+        cur.execute("SELECT lot_name FROM lots")
+        existing_names = set(
+            ((r['lot_name'] if isinstance(r, dict) else r[0]) or '').strip().upper()
+            for r in cur.fetchall()
+        )
+        while candidate.strip().upper() in existing_names and safety < 50:
+            safety += 1
+            m = re.match(r'^(\d{2}-\d{2}-\d{2})\s+(\d{3})([A-Z])$', candidate)
+            if m:
+                d_part = m.group(1)
+                b_int = int(m.group(2))
+                l_code = ord(m.group(3)) - 65 + 1
+                if l_code >= 26:
+                    b_int += 1
+                    l_code = 0
+                candidate = f"{d_part} {str(b_int).zfill(3)}{chr(65 + l_code)}"
+            else:
+                candidate = f"{candidate}_{safety}"
+
+        return candidate
+    except Exception as e:
+        print(f"Error generating lot name: {e}")
+        return f"{today} 001A"
+
 @app.route("/ppc")
 @role_required(['manager', 'admin'])
 def ppc():
     con = db()
     cur = con.cursor()
+    next_wo = get_next_work_order(cur)
+    next_plan = get_next_plan_id(cur)
+    next_bag = get_next_bag_number(cur)
     cur.execute("SELECT * FROM work_orders ORDER BY id DESC")
     work_orders = cur.fetchall()
     tree = []
@@ -857,16 +983,17 @@ def ppc():
             plan_list.append({**dict(p), "bags": bag_list})
         tree.append({**dict(wo), "plans": plan_list})
     con.close()
-    return render_template("ppc_tree.html", work_orders=tree)
+    return render_template("ppc_tree.html", work_orders=tree, next_wo=next_wo, next_plan=next_plan, next_bag=next_bag)
 
 @app.route("/ppc/work-order/add", methods=["POST"])
 def add_work_order():
+    con = db(); cur = con.cursor()
     wo = request.form.get("work_order", "").strip()
-    if wo:
-        con = db(); cur = con.cursor()
-        cur.execute("INSERT INTO work_orders (work_order) VALUES (?)", (wo,))
-        con.commit(); con.close()
-        flash("Work order added", "success")
+    if not wo:
+        wo = get_next_work_order(cur)
+    cur.execute("INSERT INTO work_orders (work_order) VALUES (?)", (wo,))
+    con.commit(); con.close()
+    flash(f"Work order {wo} added", "success")
     return redirect(url_for("ppc"))
 
 @app.route("/ppc/work-order/edit/<int:id>", methods=["GET", "POST"])
@@ -898,12 +1025,13 @@ def delete_work_order(id):
 
 @app.route("/ppc/plan/add/<int:work_order_id>", methods=["POST"])
 def add_plan(work_order_id):
+    con = db(); cur = con.cursor()
     plan_id = request.form.get("plan_id", "").strip()
-    if plan_id:
-        con = db(); cur = con.cursor()
-        cur.execute("INSERT INTO plans (work_order_id, plan_id) VALUES (?, ?)", (work_order_id, plan_id))
-        con.commit(); con.close()
-        flash("Plan added", "success")
+    if not plan_id:
+        plan_id = get_next_plan_id(cur)
+    cur.execute("INSERT INTO plans (work_order_id, plan_id) VALUES (?, ?)", (work_order_id, plan_id))
+    con.commit(); con.close()
+    flash(f"Plan {plan_id} added", "success")
     return redirect(url_for("ppc"))
 
 @app.route("/ppc/plan/edit/<int:id>", methods=["GET", "POST"])
@@ -935,16 +1063,20 @@ def delete_plan(id):
 
 @app.route("/ppc/bag/new/<int:plan_id>", methods=["GET", "POST"])
 def new_bag(plan_id):
+    con = db(); cur = con.cursor()
     if request.method == "POST":
-        con = db(); cur = con.cursor()
         bag_no = request.form.get("bag_number", "").strip()
+        if not bag_no:
+            bag_no = get_next_bag_number(cur)
         shade = request.form.get("shade", "").strip()
         cur.execute("INSERT INTO bags (plan_id, bag_number, shade, created_at) VALUES (?, ?, ?, ?)",
                     (plan_id, bag_no, shade, datetime.now().strftime("%Y-%m-%d")))
         con.commit(); con.close()
-        flash("Bag created successfully", "success")
+        flash(f"Bag {bag_no} created successfully", "success")
         return redirect(url_for("ppc"))
-    return render_template("bag_form.html", bag=None)
+    next_bag = get_next_bag_number(cur)
+    con.close()
+    return render_template("bag_form.html", bag=None, next_bag=next_bag, plan_id=plan_id)
 
 @app.route("/ppc/bag/edit/<int:id>", methods=["GET", "POST"])
 @role_required(['manager', 'admin'])
@@ -985,14 +1117,16 @@ def new_lot(bag_id):
         WHERE bags.id = ?
     """, (bag_id,))
     info = cur.fetchone()
-    curr_wo = info['work_order']
-    curr_shade = info['shade']
+    curr_wo = info['work_order'] if info else '10000'
+    curr_shade = info['shade'] if info else 'Default'
 
     if request.method == "POST":
         d = request.form
-        needles = d.get("needles", "").strip()
+        needles = d.get("needles", "24N").strip().upper()
         input_weight = float(d.get("fabric_weight", 0) or 0)
-        lot_name = d.get("lot_name", "").strip()
+        lot_name = d.get("lot_name", "").strip().upper()
+        if not lot_name:
+            lot_name = get_next_lot_name(cur, bag_id)
         fabric_length = float(d.get("fabric_length", 0) or 0)
         bag_weight = float(d.get("bag_weight", 0) or 0)
         remarks = d.get("remarks", "")
@@ -1022,11 +1156,12 @@ def new_lot(bag_id):
               datetime.now().strftime("%Y-%m-%d")))
         
         con.commit(); con.close()
-        flash(f"Lot Added! (Job #{job_no})", "success")
+        flash(f"Lot {lot_name} Added! (Job #{job_no})", "success")
         return redirect(url_for("ppc"))
 
+    next_lot = get_next_lot_name(cur, bag_id)
     con.close()
-    return render_template("lot_form.html", lot=None)
+    return render_template("lot_form.html", lot=None, next_lot=next_lot, bag_id=bag_id)
 
 @app.route("/ppc/lot/delete/<int:id>")
 def delete_lot(id):

@@ -5,6 +5,12 @@ import {
   FabricRoll, QualityCheck, FinalizedBag, DispatchRecord,
   FlashMessage, RollSticker
 } from '../types';
+import {
+  getNextWorkOrderNumber,
+  getNextPlanId,
+  getNextBagNumber,
+  getNextLotName
+} from '../utils/ppcSequence';
 
 interface AppContextType {
   currentUser: User | null;
@@ -404,8 +410,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // PPC CRUD operations
   const addWorkOrder = (name: string) => {
-    const trimmed = name.trim().toUpperCase();
-    if (!trimmed) return;
+    let trimmed = name.trim().toUpperCase();
+    if (!trimmed) {
+      trimmed = getNextWorkOrderNumber(workOrders);
+    }
     const wo: WorkOrder = { id: Date.now(), work_order: trimmed };
     setWorkOrders(prev => [...prev, wo]);
     showFlash(`Work Order ${trimmed} added`, 'success');
@@ -423,7 +431,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addPlan = (workOrderId: number, planId: string) => {
-    const trimmed = planId.trim().toUpperCase();
+    let trimmed = planId.trim().toUpperCase();
+    if (!trimmed) {
+      trimmed = getNextPlanId(plans);
+    }
     const plan: Plan = { id: Date.now(), work_order_id: workOrderId, plan_id: trimmed };
     setPlans(prev => [...prev, plan]);
     showFlash(`Plan ${trimmed} added`, 'success');
@@ -441,10 +452,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addBag = (planId: number, bagNumber: string, shade: string) => {
+    let trimmedBag = bagNumber.trim().toUpperCase();
+    if (!trimmedBag) {
+      trimmedBag = getNextBagNumber(bags);
+    }
     const bag: Bag = {
       id: Date.now(),
       plan_id: planId,
-      bag_number: bagNumber.trim().toUpperCase(),
+      bag_number: trimmedBag,
       shade: shade.trim(),
       created_at: new Date().toISOString().split('T')[0]
     };
@@ -498,11 +513,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setJobs(prev => [...prev, newJob]);
     }
 
+    const lotName = data.lot_name?.trim() ? data.lot_name.trim().toUpperCase() : getNextLotName(lots, bagId);
     const inputWeight = Number(data.fabric_weight);
     const newLotItem: Lot = {
       id: Date.now(),
       bag_id: bagId,
-      lot_name: data.lot_name.trim().toUpperCase(),
+      lot_name: lotName,
       fabric_length: Number(data.fabric_length),
       fabric_weight: inputWeight,
       plan_weight: inputWeight,
@@ -513,7 +529,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       created_at: new Date().toISOString().split('T')[0]
     };
     setLots(prev => [...prev, newLotItem]);
-    showFlash(`Lot Added! (Job #${jobNo})`, 'success');
+    showFlash(`Lot ${lotName} Added! (Job #${jobNo})`, 'success');
   };
 
   const editLot = (id: number, data: Partial<Lot>) => {

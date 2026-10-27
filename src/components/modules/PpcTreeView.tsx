@@ -2,8 +2,14 @@ import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
   FolderPlus, Plus, ChevronDown, ChevronRight, Edit3, Trash2,
-  RefreshCw, CheckCircle, Hash, Info, Layers
+  RefreshCw, CheckCircle, Hash, Info, Layers, Sparkles
 } from 'lucide-react';
+import {
+  getNextWorkOrderNumber,
+  getNextPlanId,
+  getNextBagNumber,
+  getNextLotName
+} from '../../utils/ppcSequence';
 
 export const PpcTreeView: React.FC = () => {
   const {
@@ -141,7 +147,10 @@ export const PpcTreeView: React.FC = () => {
         </div>
 
         <button
-          onClick={() => setWoModal({ open: true, name: '' })}
+          onClick={() => {
+            const nextWo = getNextWorkOrderNumber(workOrders);
+            setWoModal({ open: true, name: nextWo });
+          }}
           className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors self-start shadow-sm"
         >
           <FolderPlus className="w-4 h-4 text-emerald-400" />
@@ -187,7 +196,10 @@ export const PpcTreeView: React.FC = () => {
 
                   <div className="flex items-center gap-1.5">
                     <button
-                      onClick={() => setPlanModal({ open: true, woId: wo.id, planId: '' })}
+                      onClick={() => {
+                        const nextPlan = getNextPlanId(plans);
+                        setPlanModal({ open: true, woId: wo.id, planId: nextPlan });
+                      }}
                       className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-medium flex items-center gap-1 transition-colors"
                       title="Add Plan under this Work Order"
                     >
@@ -251,7 +263,10 @@ export const PpcTreeView: React.FC = () => {
 
                               <div className="flex items-center gap-1">
                                 <button
-                                  onClick={() => setBagModal({ open: true, planId: plan.id, bagNumber: '', shade: '' })}
+                                  onClick={() => {
+                                    const nextBag = getNextBagNumber(bags);
+                                    setBagModal({ open: true, planId: plan.id, bagNumber: nextBag, shade: '' });
+                                  }}
                                   className="px-2 py-1 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded text-xs font-medium flex items-center gap-1 transition-colors"
                                 >
                                   <Plus className="w-3 h-3 text-emerald-600" />
@@ -318,16 +333,19 @@ export const PpcTreeView: React.FC = () => {
 
                                             <div className="flex items-center gap-1">
                                               <button
-                                                onClick={() => setLotModal({
-                                                  open: true,
-                                                  bagId: bag.id,
-                                                  lot_name: '',
-                                                  fabric_length: '1000',
-                                                  fabric_weight: '400',
-                                                  bag_weight: totalBagWeight ? totalBagWeight.toString() : '400',
-                                                  needles: '24N',
-                                                  remarks: ''
-                                                })}
+                                                onClick={() => {
+                                                  const nextLot = getNextLotName(lots, bag.id);
+                                                  setLotModal({
+                                                    open: true,
+                                                    bagId: bag.id,
+                                                    lot_name: nextLot,
+                                                    fabric_length: '1000',
+                                                    fabric_weight: '400',
+                                                    bag_weight: totalBagWeight ? totalBagWeight.toString() : '400',
+                                                    needles: '24N',
+                                                    remarks: ''
+                                                  });
+                                                }}
                                                 className="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded text-xs font-medium flex items-center gap-1"
                                               >
                                                 <Plus className="w-3 h-3" />
@@ -480,15 +498,23 @@ export const PpcTreeView: React.FC = () => {
             </h3>
             <form onSubmit={handleSaveWo} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Work Order Reference</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700">Work Order Number</label>
+                  {!woModal.editId && (
+                    <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-mono font-medium border border-emerald-200 flex items-center gap-1">
+                      <Sparkles className="w-2.5 h-2.5 text-emerald-600" /> Auto 10000+
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. WO-2026-8805"
+                  placeholder="e.g. 10000"
                   value={woModal.name}
                   onChange={e => setWoModal({ ...woModal, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
                 />
+                <p className="text-[11px] text-slate-400 mt-1">5-digit sequential number, starting at 10000.</p>
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button
@@ -519,15 +545,23 @@ export const PpcTreeView: React.FC = () => {
             </h3>
             <form onSubmit={handleSavePlan} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Plan Identifier</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700">Plan Identifier</label>
+                  {!planModal.editId && (
+                    <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-mono font-medium border border-emerald-200 flex items-center gap-1">
+                      <Sparkles className="w-2.5 h-2.5 text-emerald-600" /> Auto 10000+
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. PL-8801-C"
+                  placeholder="e.g. 10000"
                   value={planModal.planId}
                   onChange={e => setPlanModal({ ...planModal, planId: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
                 />
+                <p className="text-[11px] text-slate-400 mt-1">5-digit sequential plan identifier matching the series.</p>
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button
@@ -558,18 +592,25 @@ export const PpcTreeView: React.FC = () => {
             </h3>
             <form onSubmit={handleSaveBag} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Bag Number</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700">Bag Number</label>
+                  {!bagModal.editId && (
+                    <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-mono font-medium border border-emerald-200 flex items-center gap-1">
+                      <Sparkles className="w-2.5 h-2.5 text-emerald-600" /> Auto 10000+
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. BAG-8801-03"
+                  placeholder="e.g. 10000"
                   value={bagModal.bagNumber}
                   onChange={e => setBagModal({ ...bagModal, bagNumber: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Fabric Shade / Color</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Fabric Shade / Color (Manual)</label>
                 <input
                   type="text"
                   required
@@ -609,18 +650,23 @@ export const PpcTreeView: React.FC = () => {
             <form onSubmit={handleSaveLot} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Lot Name</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-700">Lot Name</label>
+                  </div>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. LOT-A3"
+                    placeholder="e.g. 27-10-26 001A"
                     value={lotModal.lot_name}
                     onChange={e => setLotModal({ ...lotModal, lot_name: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
                   />
+                  <span className="text-[10px] text-emerald-700 mt-0.5 inline-block font-mono">
+                    Date + needle series (001A, 001B...)
+                  </span>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Needles Spec</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Needles Spec (Manual)</label>
                   <input
                     type="text"
                     required

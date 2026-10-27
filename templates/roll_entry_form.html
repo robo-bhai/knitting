@@ -1,403 +1,493 @@
 {% extends "base.html" %}
-{% block title %}Roll Entry Station | TexFlow ERP{% endblock %}
+{% block title %}Fabric Roll Feeding Station | TexFlow ERP{% endblock %}
 
 {% block content %}
-<div class="space-y-5">
-  <!-- Top Header Bar -->
-  <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-    <div>
-      <h1 class="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
-        <i class="fa-solid fa-scroll text-emerald-600"></i>
-        Fabric Roll Feeding Station (/roll-entry)
-      </h1>
-      <p class="text-xs text-slate-500 mt-1">
-        Cascading Work Order &rarr; Plan &rarr; Bag &rarr; Lot &rarr; 5-Digit Machine Barcode with instant sticker &amp; merge support.
-      </p>
+<div class="space-y-4 font-sans text-slate-800 max-w-7xl mx-auto">
+
+  <!-- ================= TOP HEADER BAR (Java Oracle ERP Silver Metallic) ================= -->
+  <div class="p-3.5 sm:p-4 rounded-xl border border-slate-300 bg-slate-100 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-lg bg-slate-200 border border-slate-400 flex items-center justify-center text-slate-800 shadow-inner">
+        <i class="fa-solid fa-scroll text-blue-900 text-sm"></i>
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-blue-100 text-blue-900 border border-blue-300">
+            ORACLE FORM TX-301
+          </span>
+          <h1 class="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight">
+            Fabric Roll Feeding Station (/roll-entry)
+          </h1>
+        </div>
+        <p class="text-[11px] text-slate-600 font-medium mt-0.5">
+          Enterprise Work Order &rarr; Plan &rarr; Bag &rarr; Lot &rarr; Machine Verification with instant 5-row barcode thermal sticker.
+        </p>
+      </div>
     </div>
-    <div class="flex items-center gap-2">
+
+    <div class="flex items-center gap-2 shrink-0">
+      <!-- Export Plan Button -->
       <button 
         type="button" 
-        onclick="openExportPlanModal(document.getElementById('wo_input')?.value)"
-        class="px-3 py-1.5 bg-gradient-to-r from-emerald-600 via-teal-700 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 text-white text-xs font-bold rounded-lg border border-emerald-800 shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+        onclick="triggerExportPlanModal()"
+        class="px-3 py-1.5 rounded text-xs font-bold border transition-all cursor-pointer shadow-xs bg-emerald-700 hover:bg-emerald-800 text-white border-emerald-900 flex items-center gap-1.5"
         title="Export this Work Order Plan to structured Excel workbook"
       >
         <i class="fa-solid fa-file-excel"></i>
         <span>Export Plan</span>
       </button>
-      <a href="{{ url_for('roll_entry_form') }}" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 transition-colors flex items-center gap-1.5">
-        <i class="fa-solid fa-keyboard"></i> Manual Form
-      </a>
-      <span class="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-800 text-xs font-semibold rounded-full border border-emerald-200">
-        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-        Auto-Cascading Active
+
+      <!-- Toggle Filter: Complete Series Only vs All PPC Work Orders -->
+      <button 
+        type="button" 
+        id="series_filter_btn" 
+        onclick="toggleCompleteSeries()"
+        class="px-3 py-1.5 rounded text-xs font-bold border transition-all cursor-pointer shadow-xs bg-slate-200 hover:bg-slate-300 text-slate-800 border-slate-400 flex items-center gap-1.5"
+        title="Toggle Filter"
+      >
+        <i class="fa-solid fa-filter text-slate-600"></i>
+        <span id="series_filter_label">All PPC Work Orders</span>
+      </button>
+
+      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white text-slate-800 text-[11px] font-bold rounded border border-slate-300 shadow-xs">
+        <span class="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
+        Reactive Cascade Active
       </span>
     </div>
   </div>
 
-  <!-- Main 2-Column Responsive Layout -->
-  <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+  <!-- ================= CARD 1: ROLL FEED ENTRY FORM ================= -->
+  <div class="rounded-xl border border-slate-300 bg-white p-4 sm:p-5 shadow-xs space-y-4">
     
-    <!-- ================= LEFT SECTION: FEED FORM & CONTROLS ================= -->
-    <div class="lg:col-span-7 space-y-4">
-      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
-        
-        <!-- Section Header -->
-        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-          <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-            <i class="fa-solid fa-layer-group text-emerald-600"></i>
-            Roll Feed Form
-          </h2>
-          <span id="cascade_status" class="text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
-            Enter or Select Work Order
-          </span>
-        </div>
-
-        <form id="save_roll_form" class="space-y-4">
-          <!-- PEHLI ROW: 4 Cascading Dropdowns/Inputs in One Row -->
-          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-            <!-- 1. Work Order -->
-            <div>
-              <div class="flex items-center justify-between mb-1">
-                <label class="block text-[11px] font-bold uppercase text-slate-700">1. Work Order <span class="text-rose-500">*</span></label>
-                <span class="text-[9px] text-slate-400 font-mono">Enter &crarr;</span>
-              </div>
-              <input 
-                type="text" 
-                id="wo_input" 
-                list="wo_datalist" 
-                autocomplete="off"
-                placeholder="Type WO & press Enter..." 
-                class="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              >
-              <datalist id="wo_datalist">
-                {% for wo in work_orders %}
-                  <option value="{{ wo }}">{{ wo }}</option>
-                {% endfor %}
-              </datalist>
-            </div>
-
-            <!-- 2. Plan ID Dropdown -->
-            <div>
-              <div class="flex items-center justify-between mb-1">
-                <label class="block text-[11px] font-bold uppercase text-slate-700">2. Plan ID <span class="text-rose-500">*</span></label>
-                <span id="plan_count_badge" class="text-[9px] text-slate-400 font-mono">--</span>
-              </div>
-              <select id="plan_select" disabled class="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-                <option value="">-- Choose Plan --</option>
-              </select>
-            </div>
-
-            <!-- 3. Bag / Badge Dropdown -->
-            <div>
-              <div class="flex items-center justify-between mb-1">
-                <label class="block text-[11px] font-bold uppercase text-slate-700">3. Bag / Badge <span class="text-rose-500">*</span></label>
-                <span id="bag_count_badge" class="text-[9px] text-slate-400 font-mono">--</span>
-              </div>
-              <select id="bag_select" disabled class="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-                <option value="">-- Choose Bag --</option>
-              </select>
-            </div>
-
-            <!-- 4. Lot Dropdown -->
-            <div>
-              <div class="flex items-center justify-between mb-1">
-                <label class="block text-[11px] font-bold uppercase text-slate-700">4. Target Lot <span class="text-rose-500">*</span></label>
-                <span id="lot_count_badge" class="text-[9px] text-slate-400 font-mono">--</span>
-              </div>
-              <select id="lot_select" disabled class="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white disabled:bg-slate-100 disabled:text-slate-400 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-                <option value="">-- Choose Lot --</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- SUMMARY STRIP IN ONE LINE (Already Feed Barcode, Job/WO, Shade, Machine) -->
-          <div id="already_feed_strip" class="p-2.5 bg-gradient-to-r from-slate-800 via-slate-700 to-slate-800 text-white rounded border border-slate-600 shadow-md text-xs hidden transition-all">
-            <div class="flex flex-wrap items-center justify-between gap-2.5">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="text-[10px] text-slate-400 uppercase font-semibold">Already Feed Barcode:</span>
-                <span id="strip_feed_barcode" class="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 font-mono font-bold rounded border border-emerald-500/30">
-                  R-??-??
-                </span>
-                <button 
-                  type="button" 
-                  id="copy_barcode_btn" 
-                  onclick="copyStripBarcode()" 
-                  class="px-2 py-0.5 text-[10px] bg-white/10 hover:bg-white/20 text-white rounded transition-colors flex items-center gap-1 cursor-pointer"
-                  title="Copy Roll Barcode"
-                >
-                  <i class="fa-solid fa-copy"></i>
-                  <span id="copy_btn_text">Copy</span>
-                </button>
-              </div>
-
-              <div class="flex flex-wrap items-center gap-3 font-mono text-[11px]">
-                <div class="px-2 py-0.5 bg-slate-800 rounded border border-slate-700">
-                  <span class="text-slate-400 text-[10px]">Job/WO:</span>
-                  <strong id="strip_job_wo" class="text-white">--</strong>
-                </div>
-                <div class="px-2 py-0.5 bg-slate-800 rounded border border-slate-700">
-                  <span class="text-slate-400 text-[10px]">Shade:</span>
-                  <strong id="strip_shade" class="text-white">--</strong>
-                </div>
-                <div class="px-2 py-0.5 bg-slate-800 rounded border border-slate-700">
-                  <span class="text-slate-400 text-[10px]">Machine:</span>
-                  <strong id="strip_machine" class="text-emerald-400">--</strong>
-                </div>
-                <div class="px-2 py-0.5 bg-slate-800 rounded border border-slate-700">
-                  <span class="text-slate-400 text-[10px]">Needles:</span>
-                  <strong id="strip_needles" class="text-white">--</strong>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- NEXT ROW: Roll Number, Roll Weight, Tube No, Machine Barcode, Submit Button -->
-          <div class="pt-2 border-t border-slate-100">
-            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 items-end">
-              
-              <!-- Roll Number Box -->
-              <div>
-                <div class="flex items-center justify-between mb-1">
-                  <label class="block text-[11px] font-bold uppercase text-slate-700">
-                    Roll Number
-                  </label>
-                  <span class="text-[9px] text-emerald-600 font-mono font-semibold" id="roll_no_hint">Auto: 1, 2, 3..</span>
-                </div>
-                <input 
-                  type="number" 
-                  id="roll_no_input" 
-                  min="1" 
-                  placeholder="Auto (1, 2..)" 
-                  class="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                >
-              </div>
-
-              <!-- Roll Weight Box -->
-              <div>
-                <label class="block text-[11px] font-bold uppercase text-slate-700 mb-1">
-                  Roll Weight (KG) <span class="text-rose-500">*</span>
-                </label>
-                <input 
-                  type="number" 
-                  step="0.01" 
-                  min="0.1" 
-                  max="150" 
-                  id="weight_input" 
-                  required 
-                  placeholder="e.g. 22.50" 
-                  class="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-emerald-50/20"
-                >
-              </div>
-
-              <!-- Tube Box -->
-              <div>
-                <label class="block text-[11px] font-bold uppercase text-slate-700 mb-1">
-                  Tube No
-                </label>
-                <input 
-                  type="text" 
-                  id="tube_input" 
-                  value="T-101" 
-                  placeholder="T-101" 
-                  class="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                >
-              </div>
-
-              <!-- Machine Sign Barcode (5-Digit) Box -->
-              <div>
-                <div class="flex items-center justify-between mb-1">
-                  <label class="block text-[11px] font-bold uppercase text-slate-700">
-                    Machine Barcode <span class="text-rose-500">*</span>
-                  </label>
-                  <span class="text-[9px] text-slate-400 font-mono">5-Digits</span>
-                </div>
-                <input 
-                  type="text" 
-                  id="machine_barcode" 
-                  required 
-                  maxlength="5"
-                  placeholder="e.g. 52918" 
-                  class="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs font-mono font-bold tracking-widest uppercase focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-emerald-50/40 text-emerald-950"
-                >
-              </div>
-
-              <!-- Submit Button -->
-              <div>
-                <button 
-                  type="submit" 
-                  id="save_roll_btn" 
-                  class="w-full px-3 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <i class="fa-solid fa-print"></i>
-                  <span>Feed Roll</span>
-                </button>
-              </div>
-            </div>
-
-            <!-- Merge Notification Notice -->
-            <div id="merge_alert_notice" class="mt-2.5 p-2.5 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-900 hidden flex items-center gap-2">
-              <i class="fa-solid fa-code-merge text-amber-600 shrink-0"></i>
-              <span id="merge_alert_text">Notice: Roll number already exists. Submitting will merge the weight into this roll!</span>
-            </div>
-
-            <!-- Live Machine Barcode Verification Status Badge -->
-            <div id="machine_spec_badge" class="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs hidden">
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <div class="flex items-center gap-3">
-                  <span class="px-2 py-0.5 rounded bg-slate-900 text-white font-mono text-[11px] font-bold" id="badge_machine_no">M-??</span>
-                  <span class="text-slate-600 font-mono text-[11px]" id="badge_specs">Needles: -- | Shade: -- | WO: --</span>
-                </div>
-                <span id="badge_match_status" class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-200 text-slate-700">Checking...</span>
-              </div>
-            </div>
-
-            <div id="form_error_box" class="mt-3 p-3 bg-rose-50 border border-rose-300 rounded-lg text-xs text-rose-800 hidden"></div>
-          </div>
-        </form>
+    <!-- Section Header -->
+    <div class="flex items-center justify-between pb-2.5 border-b border-slate-200">
+      <h2 class="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+        <i class="fa-solid fa-layer-group text-blue-900"></i>
+        ROLL FEED ENTRY FORM
+      </h2>
+      <div class="flex items-center gap-1.5">
+        <span id="plans_loaded_badge" class="text-[11px] font-bold px-2 py-0.5 rounded border bg-emerald-100 text-emerald-900 border-emerald-300">
+          2 Plan(s) Loaded
+        </span>
+        <span id="lots_ready_badge" class="text-[11px] font-bold px-2 py-0.5 rounded border bg-blue-100 text-blue-900 border-blue-300">
+          2 Lot(s) Ready
+        </span>
       </div>
     </div>
 
-    <!-- ================= RIGHT SECTION: COMPLETE DETAILS & ALREADY FEEDED ROLLS ================= -->
-    <div class="lg:col-span-5 space-y-4">
+    <form id="roll_feed_form" onsubmit="handleFeedRollSubmit(event)" class="space-y-4">
       
-      <!-- Selected Lot Details Card -->
-      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
-        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-          <h2 class="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-            <i class="fa-solid fa-circle-info text-emerald-600"></i>
-            Selected Lot Specifications
-          </h2>
-          <span id="lot_status_badge" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-600">
-            No Lot Selected
-          </span>
+      <!-- ROW 1 & 2: 4 CASCADING SELECTORS IN 2x2 GRID -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        
+        <!-- 1. SCAN/SELECT WO -->
+        <div class="space-y-1">
+          <div class="flex items-center justify-between">
+            <label class="block text-[11px] font-black uppercase text-slate-800">
+              1. SCAN/SELECT WO <span class="text-rose-600">*</span>
+            </label>
+            <span class="text-[9px] text-blue-900 font-mono font-bold cursor-pointer hover:underline" onclick="document.getElementById('wo_select').focus()">
+              Badge Scan
+            </span>
+          </div>
+          <select 
+            id="wo_select" 
+            onchange="onWoChanged(this.value)"
+            class="w-full px-2.5 py-1.5 border-2 border-slate-300 rounded text-xs font-mono font-bold uppercase bg-white text-slate-900 shadow-inner focus:border-blue-700 focus:outline-none cursor-pointer"
+          >
+            <option value="">-- Choose Work Order --</option>
+            {% for wo in work_orders %}
+              <option value="{{ wo }}">{{ wo }}</option>
+            {% endfor %}
+          </select>
         </div>
 
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 text-xs font-mono">
-          <div class="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
-            <span class="text-[10px] text-slate-400 uppercase block">Lot Needles</span>
-            <strong id="detail_needles" class="text-slate-900 text-sm">--</strong>
+        <!-- 2. PLAN ID -->
+        <div class="space-y-1">
+          <div class="flex items-center justify-between">
+            <label class="block text-[11px] font-black uppercase text-slate-800">
+              2. PLAN ID <span class="text-rose-600">*</span>
+            </label>
+            <span id="plan_count_hint" class="text-[9px] text-blue-900 font-mono font-bold">
+              0 plan(s)
+            </span>
           </div>
-          <div class="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
-            <span class="text-[10px] text-slate-400 uppercase block">Bag Shade</span>
-            <strong id="detail_shade" class="text-slate-900 truncate block text-sm">--</strong>
+          <select 
+            id="plan_select" 
+            onchange="onPlanChanged(this.value)"
+            disabled
+            class="w-full px-2.5 py-1.5 border-2 border-slate-300 rounded text-xs font-mono font-bold bg-white text-slate-900 disabled:bg-slate-100 disabled:text-slate-400 shadow-inner focus:border-blue-700 focus:outline-none cursor-pointer"
+          >
+            <option value="">-- Choose Plan --</option>
+          </select>
+        </div>
+
+        <!-- 3. BAG / BADGE -->
+        <div class="space-y-1">
+          <div class="flex items-center justify-between">
+            <label class="block text-[11px] font-black uppercase text-slate-800">
+              3. BAG / BADGE <span class="text-rose-600">*</span>
+            </label>
+            <span id="bag_shade_hint" class="text-[9px] text-amber-800 font-mono font-bold">
+              Shade: --
+            </span>
           </div>
-          <div class="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
-            <span class="text-[10px] text-slate-400 uppercase block">Total Feeded</span>
-            <strong id="detail_total_feeded" class="text-emerald-700 text-sm">0.0 KG</strong>
+          <select 
+            id="bag_select" 
+            onchange="onBagChanged(this.value)"
+            disabled
+            class="w-full px-2.5 py-1.5 border-2 border-slate-300 rounded text-xs font-mono font-bold bg-white text-slate-900 disabled:bg-slate-100 disabled:text-slate-400 shadow-inner focus:border-blue-700 focus:outline-none cursor-pointer"
+          >
+            <option value="">-- Choose Bag --</option>
+          </select>
+        </div>
+
+        <!-- 4. TARGET LOT -->
+        <div class="space-y-1">
+          <div class="flex items-center justify-between">
+            <label class="block text-[11px] font-black uppercase text-slate-800">
+              4. TARGET LOT <span class="text-rose-600">*</span>
+            </label>
+            <span id="lot_needles_hint" class="text-[9px] text-emerald-800 font-mono font-bold">
+              Needles: --
+            </span>
           </div>
-          <div class="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
-            <span class="text-[10px] text-slate-400 uppercase block">Rem Balance</span>
-            <strong id="detail_balance" class="text-slate-900 text-sm">--</strong>
+          <select 
+            id="lot_select" 
+            onchange="onLotChanged(this.value)"
+            disabled
+            class="w-full px-2.5 py-1.5 border-2 border-slate-300 rounded text-xs font-mono font-bold bg-white text-slate-900 disabled:bg-slate-100 disabled:text-slate-400 shadow-inner focus:border-blue-700 focus:outline-none cursor-pointer"
+          >
+            <option value="">-- Choose Lot --</option>
+          </select>
+        </div>
+
+      </div>
+
+      <!-- AUTO-DETECTED SYSTEM VALUES STRIP -->
+      <div class="p-2.5 bg-slate-900 text-white rounded-lg border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span class="text-[10px] uppercase font-bold text-slate-300 tracking-wider">
+            AUTO-DETECTED SYSTEM VALUES:
+          </span>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+          <div class="px-2.5 py-0.5 bg-slate-800 rounded border border-slate-700 flex items-center gap-1.5">
+            <span class="text-slate-400 text-[10px]">WO:</span>
+            <strong id="auto_wo" class="text-white">--</strong>
+          </div>
+          <div class="px-2.5 py-0.5 bg-slate-800 rounded border border-amber-500/40 flex items-center gap-1.5">
+            <span class="text-amber-400 text-[10px]">Auto-Detected Shade:</span>
+            <strong id="auto_shade" class="text-amber-300 font-bold">--</strong>
+          </div>
+          <div class="px-2.5 py-0.5 bg-slate-800 rounded border border-emerald-500/40 flex items-center gap-1.5">
+            <span class="text-emerald-400 text-[10px]">Auto-Detected Needles:</span>
+            <strong id="auto_needles" class="text-emerald-300 font-bold">--</strong>
           </div>
         </div>
       </div>
 
-      <!-- Already Feeded Rolls in Selected Lot Table -->
-      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
-        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-          <div>
-            <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-              <i class="fa-solid fa-list-check text-emerald-600"></i>
-              Feeded Rolls in this Lot
-            </h3>
-            <p class="text-[11px] text-slate-500 mt-0.5" id="rolls_table_subtitle">
-              Choose Work Order &amp; Lot to view already feeded rolls
-            </p>
-          </div>
-          <span id="rolls_count_tag" class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-700">
-            0 Rolls
+      <!-- ALREADY FEED BARCODE STRIP (Shows latest roll fed for this Lot) -->
+      <div id="already_feed_strip" class="p-2.5 bg-slate-800 text-white rounded border border-slate-700 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-[10px] text-slate-300 uppercase font-bold tracking-wide">ALREADY FEED BARCODE:</span>
+          <span id="strip_feed_barcode" class="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 font-mono font-bold rounded border border-emerald-500/40 text-xs">
+            --
           </span>
+          <button 
+            type="button" 
+            onclick="copyStripBarcode()"
+            class="px-2 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 text-white rounded transition-colors flex items-center gap-1 cursor-pointer font-bold border border-slate-600"
+            title="Copy Roll Barcode"
+          >
+            <i class="fa-solid fa-copy"></i>
+            <span id="copy_btn_text">Copy</span>
+          </button>
         </div>
-
-        <div class="mt-3 overflow-x-auto max-h-[380px] overflow-y-auto">
-          <table class="w-full text-left border-collapse text-xs">
-            <thead class="bg-slate-50 text-[10px] font-bold text-slate-500 uppercase sticky top-0 border-b border-slate-200">
-              <tr>
-                <th class="p-2">Roll #</th>
-                <th class="p-2">Weight</th>
-                <th class="p-2">Tube</th>
-                <th class="p-2">Date / Time</th>
-                <th class="p-2">Barcode</th>
-                <th class="p-2 text-center">Action</th>
-              </tr>
-            </thead>
-            <tbody id="feeded_rolls_tbody" class="divide-y divide-slate-100 font-mono text-[11px]">
-              <tr>
-                <td colspan="6" class="p-6 text-center text-slate-400 font-sans text-xs">
-                  Pehle Work Order, Plan, Bag aur Lot select karein.
-                </td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+          <div class="px-2.5 py-0.5 bg-slate-900/80 rounded border border-slate-700">
+            <span class="text-slate-400 text-[10px]">Job/WO: </span>
+            <strong id="strip_job_wo" class="text-white">--</strong>
+          </div>
+          <div class="px-2.5 py-0.5 bg-slate-900/80 rounded border border-slate-700">
+            <span class="text-slate-400 text-[10px]">Shade: </span>
+            <strong id="strip_shade" class="text-amber-300">--</strong>
+          </div>
+          <div class="px-2.5 py-0.5 bg-slate-900/80 rounded border border-slate-700">
+            <span class="text-slate-400 text-[10px]">Machine: </span>
+            <strong id="strip_machine" class="text-emerald-400">--</strong>
+          </div>
+          <div class="px-2.5 py-0.5 bg-slate-900/80 rounded border border-slate-700">
+            <span class="text-slate-400 text-[10px]">Needles: </span>
+            <strong id="strip_needles" class="text-white">--</strong>
+          </div>
         </div>
       </div>
 
+      <!-- FORM INPUTS (2x2 Grid) -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        
+        <!-- Row 1: Roll Number & Roll Weight -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-[11px] font-black uppercase text-slate-800">
+              ROLL NUMBER
+            </label>
+            <span class="text-[9px] text-blue-900 font-mono font-bold">Auto: 1, 2, 3..</span>
+          </div>
+          <input 
+            type="number" 
+            id="roll_no_input" 
+            min="1" 
+            value="1" 
+            class="w-full px-2.5 py-1.5 border-2 border-slate-300 rounded text-xs font-mono font-bold text-slate-900 bg-white shadow-inner focus:border-blue-700 focus:outline-none"
+          >
+        </div>
+
+        <div>
+          <label class="block text-[11px] font-black uppercase text-slate-800 mb-1">
+            ROLL WEIGHT (KG) <span class="text-rose-600">*</span>
+          </label>
+          <input 
+            type="number" 
+            step="0.01" 
+            min="0.1" 
+            max="150" 
+            required 
+            id="weight_input" 
+            value="22.50" 
+            class="w-full px-2.5 py-1.5 border-2 border-slate-300 rounded text-xs font-mono font-bold text-slate-900 bg-emerald-50/40 shadow-inner focus:border-emerald-700 focus:outline-none"
+          >
+        </div>
+
+        <!-- Row 2: Tube No & Machine Barcode -->
+        <div>
+          <label class="block text-[11px] font-black uppercase text-slate-800 mb-1">
+            TUBE NO
+          </label>
+          <input 
+            type="text" 
+            id="tube_input" 
+            value="T-101" 
+            class="w-full px-2.5 py-1.5 border-2 border-slate-300 rounded text-xs font-mono uppercase bg-white shadow-inner focus:border-blue-700 focus:outline-none"
+          >
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-[11px] font-black uppercase text-slate-800">
+              MACHINE BARCODE <span class="text-rose-600">*</span>
+            </label>
+            <span class="text-[9px] text-slate-600 font-mono font-bold">5-Digits</span>
+          </div>
+          <input 
+            type="text" 
+            maxlength="5" 
+            required 
+            id="machine_barcode_input" 
+            oninput="handleMachineBarcodeLive(this.value)"
+            placeholder="e.g. 54219" 
+            class="w-full px-2.5 py-1.5 border-2 border-slate-300 rounded text-xs font-mono font-bold tracking-widest uppercase bg-amber-50/60 text-slate-900 shadow-inner focus:border-blue-700 focus:outline-none"
+          >
+        </div>
+
+      </div>
+
+      <!-- FULL WIDTH FEED ROLL BUTTON -->
+      <button 
+        type="submit" 
+        id="feed_roll_btn"
+        class="w-full py-2.5 px-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-xs font-black uppercase tracking-wider transition-all border border-emerald-900 shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.99]"
+      >
+        <i class="fa-solid fa-print"></i>
+        <span>FEED ROLL</span>
+      </button>
+
+      <!-- MERGE ROLL NOTICE BANNER (Conditional) -->
+      <div id="merge_notice" class="p-2.5 bg-amber-50 border border-amber-300 rounded text-xs text-amber-950 flex items-center gap-2 hidden">
+        <i class="fa-solid fa-triangle-exclamation text-amber-600 shrink-0"></i>
+        <span>
+          <strong>Notice:</strong> Roll #<span id="merge_roll_target">--</span> already exists in this Lot. Submitting will <strong>merge +<span id="merge_weight_target">--</span> KG</strong> into the existing roll!
+        </span>
+      </div>
+
+      <!-- 100% SPEC MATCH VERIFICATION BANNER -->
+      <div id="spec_match_box" class="p-3 bg-emerald-50 border border-emerald-300 rounded-lg text-xs shadow-xs hidden">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div class="space-y-1.5">
+            <div class="flex items-center gap-2">
+              <i class="fa-solid fa-circle-check text-emerald-700 text-sm"></i>
+              <span class="font-bold text-xs text-emerald-950" id="spec_match_message">
+                100% SPEC MATCH: Machine M#M-01 verified! All 3 specifications match.
+              </span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 font-mono text-[11px] pt-0.5">
+              <span class="text-slate-600 text-[10px] uppercase font-bold">SCANNED VS SYSTEM:</span>
+              <span id="v_badge_wo" class="px-2 py-0.5 rounded border text-[10px] font-bold bg-emerald-200/70 text-emerald-900 border-emerald-400">
+                WO: <span id="v_wo">--</span> &#10003;
+              </span>
+              <span id="v_badge_shade" class="px-2 py-0.5 rounded border text-[10px] font-bold bg-emerald-200/70 text-emerald-900 border-emerald-400">
+                Shade: <span id="v_shade">--</span> &#10003;
+              </span>
+              <span id="v_badge_needles" class="px-2 py-0.5 rounded border text-[10px] font-bold bg-emerald-200/70 text-emerald-900 border-emerald-400">
+                Needles: <span id="v_needles">--</span> &#10003;
+              </span>
+              <span class="px-2 py-0.5 rounded bg-slate-800 text-white text-[10px] font-bold">
+                Machine: <span id="v_machine">--</span>
+              </span>
+            </div>
+          </div>
+          <div class="shrink-0">
+            <span class="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-700 text-white flex items-center gap-1.5 shadow-xs">
+              <i class="fa-solid fa-check"></i>
+              100% SPEC MATCH
+            </span>
+          </div>
+        </div>
+      </div>
+
+    </form>
+  </div>
+
+  <!-- ================= CARD 2: SELECTED LOT SPECIFICATIONS ================= -->
+  <div class="rounded-xl border border-slate-300 bg-white p-4 sm:p-5 shadow-xs space-y-3">
+    <div class="flex items-center justify-between pb-2 border-b border-slate-200">
+      <div class="flex items-center gap-2">
+        <i class="fa-solid fa-circle-info text-blue-900"></i>
+        <h3 class="text-xs font-black uppercase tracking-wider text-slate-800">SELECTED LOT SPECIFICATIONS</h3>
+      </div>
+      <span id="spec_lot_badge" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-800 border border-slate-300">
+        --
+      </span>
+    </div>
+
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+      <div class="p-3 bg-slate-50 border border-slate-200 rounded">
+        <span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">LOT NEEDLES</span>
+        <span id="spec_lot_needles" class="text-base font-black font-mono text-slate-900">--</span>
+      </div>
+      <div class="p-3 bg-slate-50 border border-slate-200 rounded">
+        <span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">BAG SHADE</span>
+        <span id="spec_bag_shade" class="text-base font-black font-mono text-slate-900">--</span>
+      </div>
+      <div class="p-3 bg-slate-50 border border-slate-200 rounded">
+        <span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">TOTAL FEEDED</span>
+        <span id="spec_total_feeded" class="text-base font-black font-mono text-emerald-800">0.0 KG</span>
+      </div>
+      <div class="p-3 bg-slate-50 border border-slate-200 rounded">
+        <span class="text-[10px] font-bold text-slate-500 uppercase block mb-1">REM BALANCE</span>
+        <span id="spec_rem_balance" class="text-base font-black font-mono text-blue-900">0.0 KG</span>
+      </div>
     </div>
   </div>
+
+  <!-- ================= CARD 3: FEEDED ROLLS IN THIS LOT ================= -->
+  <div class="rounded-xl border border-slate-300 bg-white p-4 sm:p-5 shadow-xs space-y-3">
+    <div class="flex items-center justify-between pb-2 border-b border-slate-200">
+      <div>
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-tag text-blue-900"></i>
+          <h3 class="text-xs font-black uppercase tracking-wider text-slate-800">FEEDED ROLLS IN THIS LOT</h3>
+        </div>
+        <p id="table_lot_subtitle" class="text-[11px] text-slate-500 mt-0.5">Rolls registered for this Lot</p>
+      </div>
+      <span id="feeded_rolls_badge" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-800 border border-slate-300">
+        0 ROLL(S)
+      </span>
+    </div>
+
+    <div class="overflow-x-auto rounded border border-slate-200">
+      <table class="w-full text-left border-collapse text-xs">
+        <thead class="bg-slate-100 text-[10px] font-black text-slate-800 uppercase border-b border-slate-200">
+          <tr>
+            <th class="p-2.5">ROLL #</th>
+            <th class="p-2.5">WEIGHT</th>
+            <th class="p-2.5">TUBE</th>
+            <th class="p-2.5">DATE / TIME</th>
+            <th class="p-2.5">BARCODE</th>
+            <th class="p-2.5 text-center">ACTION</th>
+          </tr>
+        </thead>
+        <tbody id="rolls_table_body" class="divide-y divide-slate-100 font-mono text-xs">
+          <tr>
+            <td colspan="6" class="p-6 text-center text-slate-400 font-sans text-xs">
+              Choose Work Order, Plan, Bag and Lot above to view feeded rolls.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
 </div>
 
-<!-- ================= SPECIFICATION MISMATCH ALERT POPUP MODAL ================= -->
+<!-- ================= SPECIFICATION MISMATCH POPUP MODAL ================= -->
 <div id="mismatch_modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 hidden">
-  <div class="bg-white rounded-2xl max-w-lg w-full border-2 border-rose-500 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-    <div class="bg-rose-600 p-4 text-white flex items-center justify-between">
+  <div class="bg-white rounded-xl max-w-lg w-full border-2 border-rose-600 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
+    <div class="bg-rose-700 p-3.5 text-white flex items-center justify-between border-b border-rose-900">
       <div class="flex items-center gap-2.5">
-        <div class="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center text-lg font-bold">
-          <i class="fa-solid fa-triangle-exclamation"></i>
+        <div class="w-8 h-8 rounded bg-white/20 flex items-center justify-center text-lg font-bold">
+          <i class="fa-solid fa-triangle-exclamation text-white"></i>
         </div>
         <div>
           <h3 class="font-bold text-sm tracking-wide" id="mismatch_modal_title">🚨 Specification Mismatch!</h3>
-          <p class="text-[11px] text-rose-100">Roll feed nahi ho sakta jab tak Machine Barcode match na ho</p>
+          <p class="text-[11px] text-rose-200">Roll feed nahi ho sakta jab tak Machine Barcode match na ho</p>
         </div>
       </div>
-      <button type="button" onclick="closeMismatchModal()" class="text-white/80 hover:text-white text-lg cursor-pointer">
-        <i class="fa-solid fa-xmark"></i>
+      <button type="button" onclick="closeMismatchModal()" class="text-white/80 hover:text-white p-1 rounded cursor-pointer">
+        <i class="fa-solid fa-xmark text-lg"></i>
       </button>
     </div>
-
-    <div class="p-5 space-y-4 text-xs">
-      <div class="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 font-medium flex items-start gap-2.5">
-        <i class="fa-solid fa-circle-xmark text-rose-600 text-base mt-0.5 shrink-0"></i>
+    
+    <div class="p-4 space-y-3.5 text-xs font-sans">
+      <div class="p-3 bg-rose-50 border border-rose-300 rounded text-rose-900 font-medium flex items-start gap-2.5">
+        <i class="fa-solid fa-circle-exclamation text-rose-600 text-base mt-0.5 shrink-0"></i>
         <div id="mismatch_modal_msg" class="leading-relaxed">--</div>
       </div>
-
-      <!-- Comparative Table -->
-      <div class="border border-slate-200 rounded-xl overflow-hidden">
-        <div class="bg-slate-50 px-3 py-2 font-bold text-slate-700 text-[11px] uppercase border-b flex justify-between items-center">
-          <span>Specification Comparison</span>
-          <span class="text-[10px] text-slate-400 font-normal">Machine Sign vs Selected Lot</span>
+      
+      <div id="mismatch_specs_grid" class="grid grid-cols-2 gap-3 pt-1">
+        <div class="p-3 rounded bg-slate-100 border border-slate-300">
+          <span class="font-bold uppercase tracking-wider text-[10px] text-slate-700 block mb-1">
+            Chuna Hua Lot Spec:
+          </span>
+          <div class="space-y-1 font-mono text-[11px]">
+            <div>Needles: <strong id="m_lot_needles">--</strong></div>
+            <div>Shade: <strong id="m_lot_shade">--</strong></div>
+            <div>WO: <strong id="m_lot_wo">--</strong></div>
+          </div>
         </div>
-        <table class="w-full text-left">
-          <thead class="bg-slate-100/70 text-[10px] text-slate-500 uppercase border-b">
-            <tr>
-              <th class="p-2">Parameter</th>
-              <th class="p-2">Machine Barcode</th>
-              <th class="p-2">Selected Lot / Bag</th>
-              <th class="p-2 text-center">Result</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-slate-100 font-mono text-xs" id="mismatch_comparison_tbody"></tbody>
-        </table>
+        <div class="p-3 rounded bg-rose-50 border border-rose-300">
+          <span class="font-bold uppercase tracking-wider text-[10px] text-rose-700 block mb-1">
+            Signed Machine Barcode (<span id="m_code">--</span>):
+          </span>
+          <div class="space-y-1 font-mono text-[11px]">
+            <div>Needles: <strong id="m_mach_needles">--</strong></div>
+            <div>Machine: <strong id="m_mach_no">--</strong></div>
+            <div>WO: <strong id="m_mach_wo">--</strong></div>
+          </div>
+        </div>
       </div>
 
-      <div class="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-[11px] flex items-center gap-2">
-        <i class="fa-solid fa-lightbulb text-amber-600 shrink-0"></i>
-        <span><strong>Hal:</strong> Sahi 5-digit Machine Barcode scan karein ya Machine Sign-In (/machine-sign) se matching spec set karein.</span>
+      <div class="p-2.5 bg-amber-50 rounded border border-amber-300 text-amber-900 flex items-start gap-2">
+        <i class="fa-solid fa-lightbulb text-amber-600 mt-0.5 shrink-0"></i>
+        <span class="text-[11px]">
+          <strong>Hal (Solution):</strong> Agar machine par doosra shade ya needle lagi hai, pehle <strong>/machine-sign</strong> par jakar nayi machine sign in karein aur waha se hasil shuda 5-digit barcode enter karein.
+        </span>
       </div>
+    </div>
 
-      <div class="flex justify-end pt-1">
-        <button type="button" onclick="closeMismatchModal()" class="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-sm cursor-pointer">
-          Theek Karein / Close
-        </button>
-      </div>
+    <div class="p-3 bg-slate-100 border-t border-slate-300 flex items-center justify-end gap-2">
+      <button type="button" onclick="closeMismatchModal()" class="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded text-xs font-bold cursor-pointer">
+        Theek Hai / Samajh Gaya
+      </button>
     </div>
   </div>
 </div>
 
 <!-- ================= INSTANT PRINTABLE THERMAL STICKER MODAL ================= -->
 <div id="thermal_sticker_modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 hidden">
-  <div class="bg-white rounded-2xl max-w-sm w-full border border-slate-300 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-    
-    <!-- Modal Header -->
+  <div class="bg-white rounded-xl max-w-sm w-full border border-slate-300 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
     <div class="bg-slate-900 text-white p-3.5 flex items-center justify-between">
       <div class="flex items-center gap-2">
         <i class="fa-solid fa-tag text-emerald-400"></i>
@@ -408,11 +498,9 @@
       </button>
     </div>
 
-    <!-- Printable Sticker Content Area -->
     <div class="p-4 bg-slate-100 flex flex-col items-center">
-      <div id="printable_sticker_card" class="w-full bg-white border-2 border-slate-900 rounded-lg p-3 text-slate-900 font-mono text-xs shadow-sm space-y-2">
-        
-        <!-- ROW 1: Bag Number | Lot | Roll Number -->
+      <div id="printable_card" class="w-full bg-white border-2 border-slate-900 rounded p-3 text-slate-900 font-mono text-xs shadow-sm space-y-2">
+        <!-- ROW 1 -->
         <div class="grid grid-cols-3 border-b-2 border-slate-900 pb-1.5 text-center font-bold">
           <div class="text-left">
             <span class="text-[9px] text-slate-500 uppercase block font-sans">Bag No</span>
@@ -427,8 +515,7 @@
             <span id="stk_roll_no" class="text-base font-black">--</span>
           </div>
         </div>
-
-        <!-- ROW 2: Job / Work Order | Needle -->
+        <!-- ROW 2 -->
         <div class="grid grid-cols-2 border-b-2 border-slate-900 pb-1.5 font-bold">
           <div>
             <span class="text-[9px] text-slate-500 uppercase block font-sans">Job / WO</span>
@@ -439,8 +526,7 @@
             <span id="stk_needle">--</span>
           </div>
         </div>
-
-        <!-- ROW 3: Machine | Weight -->
+        <!-- ROW 3 -->
         <div class="grid grid-cols-2 border-b-2 border-slate-900 pb-1.5 font-bold">
           <div>
             <span class="text-[9px] text-slate-500 uppercase block font-sans">Machine</span>
@@ -451,758 +537,494 @@
             <span id="stk_weight" class="text-sm font-black">-- KG</span>
           </div>
         </div>
-
-        <!-- ROW 4 & 5: Roll Barcode Text & Laser Scannable Barcode Bars -->
-        <div class="pt-1 flex flex-col items-center justify-center">
-          <svg id="stk_barcode_svg" class="w-full max-h-12"></svg>
-          <div id="stk_barcode_text" class="text-xs font-black tracking-widest font-mono mt-0.5">--</div>
+        <!-- ROW 4 -->
+        <div class="border-b-2 border-slate-900 pb-1.5 font-bold text-center">
+          <span class="text-[9px] text-slate-500 uppercase block font-sans">Fabric Shade</span>
+          <span id="stk_shade" class="text-xs">--</span>
+        </div>
+        <!-- ROW 5: Barcode & Tube -->
+        <div class="pt-1 flex flex-col items-center justify-center space-y-1">
+          <div class="font-mono text-sm tracking-widest font-black" id="stk_barcode">R-00-00</div>
+          <div class="text-[9px] text-slate-500 font-sans">
+            Tube: <span id="stk_tube">--</span> &bull; <span id="stk_date">--</span>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- Modal Action Buttons -->
-    <div class="p-3 bg-white border-t border-slate-200 flex items-center justify-between gap-2">
-      <button 
-        type="button" 
-        onclick="closeStickerModal()" 
-        class="px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
-      >
-        Close &amp; Next Roll
-      </button>
-      <button 
-        type="button" 
-        onclick="printStickerNow()" 
-        class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm cursor-pointer"
-      >
-        <i class="fa-solid fa-print"></i>
-        <span>Print Sticker</span>
-      </button>
+      <div class="mt-4 flex items-center justify-end gap-2 w-full">
+        <button type="button" onclick="closeStickerModal()" class="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-200 rounded">
+          Close
+        </button>
+        <button type="button" onclick="printSticker()" class="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-xs font-bold flex items-center gap-1.5 shadow-sm">
+          <i class="fa-solid fa-print"></i>
+          <span>Print Sticker</span>
+        </button>
+      </div>
     </div>
   </div>
 </div>
 
-<style>
-  @media print {
-    body * { visibility: hidden !important; }
-    #printable_sticker_card, #printable_sticker_card * {
-      visibility: visible !important;
-    }
-    #printable_sticker_card {
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 100mm;
-      max-width: 100mm;
-      border: 2px solid #000 !important;
-      padding: 4mm !important;
-    }
-  }
-</style>
-{% endblock %}
-
-{% block scripts %}
+<!-- ================= JAVASCRIPT LOGIC ================= -->
 <script>
-  let currentWo = '', currentPlan = '', currentBag = '', currentShade = '', currentLot = '', currentNeedles = '';
-  let activeMachineData = null;
-  let currentLotRolls = [];
-  let existingRollNumbers = new Set();
-  let latestFeedBarcode = '';
+// Global State for Roll Entry Station
+let currentWo = "";
+let currentPlan = "";
+let currentBag = "";
+let currentLot = "";
+let currentBagObj = null;
+let currentLotObj = null;
+let currentLotsList = [];
+let allMachineAssignments = [];
+let completeSeriesOnly = false;
 
-  // DOM Elements
-  const woInput = document.getElementById('wo_input');
-  const planSelect = document.getElementById('plan_select');
-  const bagSelect = document.getElementById('bag_select');
-  const lotSelect = document.getElementById('lot_select');
-  const planCountBadge = document.getElementById('plan_count_badge');
-  const bagCountBadge = document.getElementById('bag_count_badge');
-  const lotCountBadge = document.getElementById('lot_count_badge');
-  const cascadeStatus = document.getElementById('cascade_status');
+// Initialize on DOM Ready
+document.addEventListener("DOMContentLoaded", () => {
+  const woSelect = document.getElementById("wo_select");
+  if (woSelect && woSelect.options.length > 1) {
+    woSelect.selectedIndex = 1;
+    onWoChanged(woSelect.value);
+  }
+});
 
-  const rollNoInput = document.getElementById('roll_no_input');
-  const weightInput = document.getElementById('weight_input');
-  const tubeInput = document.getElementById('tube_input');
-  const machineBarcodeInput = document.getElementById('machine_barcode');
-  const saveRollBtn = document.getElementById('save_roll_btn');
-  const mergeAlertNotice = document.getElementById('merge_alert_notice');
-  const mergeAlertText = document.getElementById('merge_alert_text');
-  const rollNoHint = document.getElementById('roll_no_hint');
-  const formErrorBox = document.getElementById('form_error_box');
+// Toggle Filter
+function toggleCompleteSeries() {
+  completeSeriesOnly = !completeSeriesOnly;
+  const btn = document.getElementById("series_filter_btn");
+  const label = document.getElementById("series_filter_label");
+  if (completeSeriesOnly) {
+    btn.className = "px-3 py-1.5 rounded text-xs font-bold border transition-all cursor-pointer shadow-xs bg-blue-800 text-white border-blue-950 flex items-center gap-1.5";
+    label.innerText = "Complete Series Only";
+  } else {
+    btn.className = "px-3 py-1.5 rounded text-xs font-bold border transition-all cursor-pointer shadow-xs bg-slate-200 hover:bg-slate-300 text-slate-800 border-slate-400 flex items-center gap-1.5";
+    label.innerText = "All PPC Work Orders";
+  }
+}
 
-  const alreadyFeedStrip = document.getElementById('already_feed_strip');
-  const stripFeedBarcode = document.getElementById('strip_feed_barcode');
-  const stripJobWo = document.getElementById('strip_job_wo');
-  const stripShade = document.getElementById('strip_shade');
-  const stripMachine = document.getElementById('strip_machine');
-  const stripNeedles = document.getElementById('strip_needles');
+// 1. Work Order Changed
+async function onWoChanged(woVal) {
+  currentWo = (woVal || "").trim();
+  document.getElementById("auto_wo").innerText = currentWo || "--";
+  document.getElementById("plan_select").innerHTML = '<option value="">-- Choose Plan --</option>';
+  document.getElementById("bag_select").innerHTML = '<option value="">-- Choose Bag --</option>';
+  document.getElementById("lot_select").innerHTML = '<option value="">-- Choose Lot --</option>';
+  document.getElementById("plan_select").disabled = true;
+  document.getElementById("bag_select").disabled = true;
+  document.getElementById("lot_select").disabled = true;
+  resetSummaryCards();
 
-  const detailNeedles = document.getElementById('detail_needles');
-  const detailShade = document.getElementById('detail_shade');
-  const detailTotalFeeded = document.getElementById('detail_total_feeded');
-  const detailBalance = document.getElementById('detail_balance');
-  const lotStatusBadge = document.getElementById('lot_status_badge');
+  if (!currentWo) return;
 
-  const feededRollsTbody = document.getElementById('feeded_rolls_tbody');
-  const rollsCountTag = document.getElementById('rolls_count_tag');
-  const rollsTableSubtitle = document.getElementById('rolls_table_subtitle');
+  try {
+    const res = await fetch(`/api/plans?wo=${encodeURIComponent(currentWo)}`);
+    const data = await res.json();
+    const planSelect = document.getElementById("plan_select");
+    planSelect.innerHTML = '<option value="">-- Choose Plan --</option>';
+    
+    const plans = data.plans || (Array.isArray(data) ? data : []);
+    document.getElementById("plan_count_hint").innerText = `${plans.length} plan(s)`;
+    document.getElementById("plans_loaded_badge").innerText = `${plans.length} Plan(s) Loaded`;
 
-  const machineSpecBadge = document.getElementById('machine_spec_badge');
-  const badgeMachineNo = document.getElementById('badge_machine_no');
-  const badgeSpecs = document.getElementById('badge_specs');
-  const badgeMatchStatus = document.getElementById('badge_match_status');
-
-  // ================= 1. WORK ORDER INPUT: ENTER / BLUR / CHANGE =================
-  woInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const val = this.value.trim();
-      if (val) {
-        handleWoSelected(val);
-        planSelect.focus();
-      }
-    }
-  });
-
-  woInput.addEventListener('change', function() {
-    const val = this.value.trim();
-    if (val) handleWoSelected(val);
-  });
-
-  woInput.addEventListener('blur', function() {
-    const val = this.value.trim();
-    if (val && val !== currentWo) handleWoSelected(val);
-  });
-
-  async function handleWoSelected(wo) {
-    if (!wo) return;
-    currentWo = wo;
-    currentPlan = '';
-    currentBag = '';
-    currentLot = '';
-
-    planSelect.innerHTML = '<option value="">Loading plans...</option>';
-    planSelect.disabled = true;
-    bagSelect.innerHTML = '<option value="">-- Choose Bag --</option>';
-    bagSelect.disabled = true;
-    lotSelect.innerHTML = '<option value="">-- Choose Lot --</option>';
-    lotSelect.disabled = true;
-    alreadyFeedStrip.classList.add('hidden');
-
-    cascadeStatus.innerText = 'Loading plans...';
-    cascadeStatus.className = 'text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800';
-
-    try {
-      let res = await fetch('/api/plans?wo=' + encodeURIComponent(wo));
-      if (!res.ok) res = await fetch('/api/plans/' + encodeURIComponent(wo));
-      const plans = await res.json();
-      planSelect.innerHTML = '<option value="">-- Choose Plan --</option>';
-
-      if (Array.isArray(plans) && plans.length > 0) {
-        plans.forEach(p => {
-          const pVal = typeof p === 'object' ? p.plan_id : p;
-          planSelect.innerHTML += `<option value="${pVal}">${pVal}</option>`;
-        });
-        planSelect.disabled = false;
-        planCountBadge.innerText = `${plans.length} plan(s)`;
-        cascadeStatus.innerText = 'Select Plan';
-        cascadeStatus.className = 'text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800';
-
-        // Auto select first plan
-        planSelect.selectedIndex = 1;
-        handlePlanSelected(planSelect.value);
-      } else {
-        planSelect.innerHTML = '<option value="">No plans found for this WO</option>';
-        planSelect.disabled = false;
-        planCountBadge.innerText = '0 plans';
-        cascadeStatus.innerText = 'No plans registered in PPC';
-        cascadeStatus.className = 'text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800';
-      }
-    } catch (err) {
-      console.warn('Error fetching plans:', err);
-      planSelect.innerHTML = '<option value="">Error loading plans</option>';
+    if (plans.length > 0) {
+      plans.forEach(p => {
+        const opt = document.createElement("option");
+        opt.value = p;
+        opt.innerText = p;
+        planSelect.appendChild(opt);
+      });
       planSelect.disabled = false;
+      planSelect.selectedIndex = 1;
+      onPlanChanged(planSelect.value);
     }
+  } catch (err) {
+    console.error("Error loading plans:", err);
   }
+}
 
-  // ================= 2. PLAN SELECT =================
-  planSelect.addEventListener('change', function() {
-    handlePlanSelected(this.value);
-    bagSelect.focus();
-  });
+// 2. Plan Changed
+async function onPlanChanged(planVal) {
+  currentPlan = (planVal || "").trim();
+  document.getElementById("bag_select").innerHTML = '<option value="">-- Choose Bag --</option>';
+  document.getElementById("lot_select").innerHTML = '<option value="">-- Choose Lot --</option>';
+  document.getElementById("bag_select").disabled = true;
+  document.getElementById("lot_select").disabled = true;
+  resetSummaryCards();
 
-  async function handlePlanSelected(planId) {
-    currentPlan = planId;
-    currentBag = '';
-    currentLot = '';
+  if (!currentPlan) return;
 
-    bagSelect.innerHTML = '<option value="">Loading bags...</option>';
-    bagSelect.disabled = true;
-    lotSelect.innerHTML = '<option value="">-- Choose Lot --</option>';
-    lotSelect.disabled = true;
-    alreadyFeedStrip.classList.add('hidden');
+  try {
+    const res = await fetch(`/api/bags?plan_id=${encodeURIComponent(currentPlan)}`);
+    const data = await res.json();
+    const bagSelect = document.getElementById("bag_select");
+    bagSelect.innerHTML = '<option value="">-- Choose Bag --</option>';
 
-    if (!currentPlan) return;
-
-    cascadeStatus.innerText = 'Loading bags...';
-    try {
-      let res = await fetch('/api/bags?plan_id=' + encodeURIComponent(currentPlan));
-      if (!res.ok) res = await fetch('/api/bags/' + encodeURIComponent(currentPlan));
-      const bags = await res.json();
-      bagSelect.innerHTML = '<option value="">-- Choose Bag --</option>';
-
-      if (Array.isArray(bags) && bags.length > 0) {
-        bags.forEach(b => {
-          const bagNo = typeof b === 'object' ? b.bag_number : b;
-          const bagId = typeof b === 'object' ? (b.id || '') : '';
-          const shade = typeof b === 'object' ? (b.shade || '') : '';
-          const label = typeof b === 'object' ? (b.label || `${b.bag_number} (${b.shade || 'No Shade'})`) : b;
-          bagSelect.innerHTML += `<option value="${bagNo}" data-bag-id="${bagId}" data-shade="${shade}">${label}</option>`;
-        });
-        bagSelect.disabled = false;
-        bagCountBadge.innerText = `${bags.length} bag(s)`;
-        cascadeStatus.innerText = 'Select Bag';
-        cascadeStatus.className = 'text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800';
-
-        // Auto select first bag
-        bagSelect.selectedIndex = 1;
-        handleBagSelected(bagSelect.value);
-      } else {
-        bagSelect.innerHTML = '<option value="">No bags found for this Plan</option>';
-        bagSelect.disabled = false;
-        bagCountBadge.innerText = '0 bags';
-        cascadeStatus.innerText = 'No bags in Plan';
-        cascadeStatus.className = 'text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800';
-      }
-    } catch (err) {
-      console.warn('Error fetching bags:', err);
-      bagSelect.innerHTML = '<option value="">Error loading bags</option>';
+    const bags = data.bags || (Array.isArray(data) ? data : []);
+    if (bags.length > 0) {
+      bags.forEach(b => {
+        const opt = document.createElement("option");
+        opt.value = b.bag_number;
+        opt.innerText = `${b.bag_number} (${b.shade})`;
+        opt.dataset.shade = b.shade;
+        bagSelect.appendChild(opt);
+      });
       bagSelect.disabled = false;
+      bagSelect.selectedIndex = 1;
+      onBagChanged(bagSelect.value);
     }
+  } catch (err) {
+    console.error("Error loading bags:", err);
   }
+}
 
-  // ================= 3. BAG SELECT =================
-  bagSelect.addEventListener('change', function() {
-    handleBagSelected(this.value);
-    lotSelect.focus();
-  });
+// 3. Bag Changed
+async function onBagChanged(bagVal) {
+  currentBag = (bagVal || "").trim();
+  const bagSelect = document.getElementById("bag_select");
+  const selectedOpt = bagSelect.options[bagSelect.selectedIndex];
+  const shade = selectedOpt?.dataset?.shade || "";
+  currentBagObj = { bag_number: currentBag, shade: shade };
 
-  async function handleBagSelected(bagNo) {
-    currentBag = bagNo;
-    currentLot = '';
-    const selOpt = bagSelect.options[bagSelect.selectedIndex];
-    currentShade = selOpt ? (selOpt.getAttribute('data-shade') || '') : '';
-    const bagId = selOpt ? (selOpt.getAttribute('data-bag-id') || '') : '';
+  document.getElementById("auto_shade").innerText = shade || "--";
+  document.getElementById("bag_shade_hint").innerText = shade ? `Shade: ${shade}` : "Shade: --";
+  document.getElementById("spec_bag_shade").innerText = shade || "--";
 
-    lotSelect.innerHTML = '<option value="">Loading lots...</option>';
-    lotSelect.disabled = true;
-    alreadyFeedStrip.classList.add('hidden');
+  document.getElementById("lot_select").innerHTML = '<option value="">-- Choose Lot --</option>';
+  document.getElementById("lot_select").disabled = true;
 
-    if (!currentBag && !bagId) return;
+  if (!currentBag) return;
 
-    cascadeStatus.innerText = 'Loading lots...';
-    try {
-      let url = '/api/lots?bag_number=' + encodeURIComponent(currentBag);
-      if (bagId) url += '&bag_id=' + encodeURIComponent(bagId);
-      let res = await fetch(url);
-      if (!res.ok) res = await fetch('/api/lots/' + encodeURIComponent(currentBag));
-      const lots = await res.json();
-      lotSelect.innerHTML = '<option value="">-- Choose Lot --</option>';
+  try {
+    const res = await fetch(`/api/lots?bag=${encodeURIComponent(currentBag)}`);
+    const data = await res.json();
+    const lotSelect = document.getElementById("lot_select");
+    lotSelect.innerHTML = '<option value="">-- Choose Lot --</option>';
 
-      if (Array.isArray(lots) && lots.length > 0) {
-        lots.forEach(lot => {
-          const bal = (lot.rem_weight !== undefined && lot.rem_weight !== null) ? Number(lot.rem_weight).toFixed(1) : Number(lot.fabric_weight || 0).toFixed(1);
-          lotSelect.innerHTML += `<option value="${lot.lot_name}" data-needles="${lot.needles || '24N'}" data-barcode="${lot.barcode || ''}">${lot.lot_name} (${lot.needles || '24N'} - Bal: ${bal} KG)</option>`;
-        });
-        lotSelect.disabled = false;
-        lotCountBadge.innerText = `${lots.length} lot(s)`;
-        cascadeStatus.innerText = 'Select Lot';
-        cascadeStatus.className = 'text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800';
+    currentLotsList = data.lots || (Array.isArray(data) ? data : []);
+    document.getElementById("lots_ready_badge").innerText = `${currentLotsList.length} Lot(s) Ready`;
 
-        // Auto select first lot
-        lotSelect.selectedIndex = 1;
-        handleLotSelected(lotSelect.value);
-      } else {
-        lotSelect.innerHTML = '<option value="">No lots found for this Bag</option>';
-        lotSelect.disabled = false;
-        lotCountBadge.innerText = '0 lots';
-        cascadeStatus.innerText = 'No lots in Bag';
-        cascadeStatus.className = 'text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800';
-      }
-    } catch (err) {
-      console.warn('Error fetching lots:', err);
-      lotSelect.innerHTML = '<option value="">Error loading lots</option>';
+    if (currentLotsList.length > 0) {
+      currentLotsList.forEach(l => {
+        const opt = document.createElement("option");
+        opt.value = l.lot_name;
+        const bal = parseFloat(l.fabric_weight ?? l.rem_weight ?? 0);
+        opt.innerText = `${l.lot_name} (${l.needles || '24N'} - Bal: ${bal.toFixed(1)} KG)`;
+        opt.dataset.needles = l.needles || '24N';
+        opt.dataset.bal = bal;
+        lotSelect.appendChild(opt);
+      });
       lotSelect.disabled = false;
+      lotSelect.selectedIndex = 1;
+      onLotChanged(lotSelect.value);
     }
+  } catch (err) {
+    console.error("Error loading lots:", err);
+  }
+}
+
+// 4. Lot Changed
+async function onLotChanged(lotVal) {
+  currentLot = (lotVal || "").trim();
+  const lotSelect = document.getElementById("lot_select");
+  const selectedOpt = lotSelect.options[lotSelect.selectedIndex];
+  const needles = selectedOpt?.dataset?.needles || "24N";
+  const bal = parseFloat(selectedOpt?.dataset?.bal || 0);
+
+  currentLotObj = currentLotsList.find(l => l.lot_name === currentLot) || {
+    lot_name: currentLot,
+    needles: needles,
+    fabric_weight: bal
+  };
+
+  document.getElementById("auto_needles").innerText = needles || "--";
+  document.getElementById("lot_needles_hint").innerText = needles ? `Needles: ${needles}` : "Needles: --";
+  document.getElementById("spec_lot_badge").innerText = currentLot || "--";
+  document.getElementById("spec_lot_needles").innerText = needles || "--";
+  document.getElementById("spec_rem_balance").innerText = `${bal.toFixed(1)} KG`;
+  document.getElementById("table_lot_subtitle").innerText = `Rolls registered for ${currentLot}`;
+
+  // Load feeded rolls for this lot
+  loadFeededRollsForLot();
+
+  // Re-validate barcode if present
+  const bcInput = document.getElementById("machine_barcode_input").value;
+  if (bcInput.length === 5) {
+    handleMachineBarcodeLive(bcInput);
+  }
+}
+
+// Load feeded rolls for selected lot
+async function loadFeededRollsForLot() {
+  if (!currentWo || !currentLot) return;
+  try {
+    const res = await fetch(`/api/feeded-rolls?wo=${encodeURIComponent(currentWo)}&lot=${encodeURIComponent(currentLot)}&bag=${encodeURIComponent(currentBag)}`);
+    const data = await res.json();
+    const rolls = data.rolls || [];
+    renderRollsTable(rolls);
+  } catch (err) {
+    console.error("Error loading rolls:", err);
+  }
+}
+
+function renderRollsTable(rolls) {
+  const tbody = document.getElementById("rolls_table_body");
+  const countBadge = document.getElementById("feeded_rolls_badge");
+  countBadge.innerText = `${rolls.length} ROLL(S)`;
+
+  let totalWeight = 0;
+  if (rolls.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" class="p-6 text-center text-slate-500 font-sans text-xs bg-slate-50">
+          Abhi is lot mein koi roll feed nahi hua. Upar form se feed karein.
+        </td>
+      </tr>
+    `;
+    document.getElementById("spec_total_feeded").innerText = "0.0 KG";
+    document.getElementById("roll_no_input").value = "1";
+    document.getElementById("tube_input").value = "T-101";
+    document.getElementById("already_feed_strip").classList.add("hidden");
+    return;
   }
 
-  // ================= 4. LOT SELECT & LOT ROLLS DETAILS =================
-  lotSelect.addEventListener('change', function() {
-    handleLotSelected(this.value);
-    weightInput.focus();
+  // Update strip with latest roll
+  const latest = rolls[0];
+  document.getElementById("already_feed_strip").classList.remove("hidden");
+  document.getElementById("strip_feed_barcode").innerText = latest.roll_barcode || "--";
+  document.getElementById("strip_job_wo").innerText = `Job-1/${latest.work_order || currentWo}`;
+  document.getElementById("strip_shade").innerText = currentBagObj?.shade || "--";
+  document.getElementById("strip_machine").innerText = latest.machine_no || "M-01";
+  document.getElementById("strip_needles").innerText = latest.needles || currentLotObj?.needles || "--";
+
+  let html = "";
+  let maxRollNo = 0;
+  rolls.forEach(r => {
+    const w = parseFloat(r.weight || 0);
+    totalWeight += w;
+    const rNo = parseInt(r.roll_no || 0);
+    if (rNo > maxRollNo) maxRollNo = rNo;
+
+    html += `
+      <tr class="hover:bg-blue-50/60 transition-colors even:bg-slate-50/70">
+        <td class="p-2 font-bold text-slate-900 flex items-center gap-1.5">
+          <span>#${r.roll_no}</span>
+          ${r.is_merged ? '<span class="px-1.5 py-0.2 rounded bg-amber-200 text-amber-900 text-[9px] font-sans font-bold border border-amber-300">Merged</span>' : ''}
+        </td>
+        <td class="p-2 font-black text-emerald-800">${w.toFixed(2)} KG</td>
+        <td class="p-2 text-slate-700">${r.tube_no || 'T-101'}</td>
+        <td class="p-2 text-slate-600 text-[10px]">${r.created_at || '--'}</td>
+        <td class="p-2 text-slate-800 font-bold">${r.roll_barcode || '--'}</td>
+        <td class="p-2 text-center">
+          <button 
+            type="button" 
+            onclick='openStickerModalDirect(${JSON.stringify(r)})'
+            class="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded font-sans text-[10px] font-bold inline-flex items-center gap-1 border border-slate-300"
+          >
+            <i class="fa-solid fa-print text-blue-900"></i>
+            <span>Sticker</span>
+          </button>
+        </td>
+      </tr>
+    `;
   });
 
-  async function handleLotSelected(lotName) {
-    currentLot = lotName;
-    if (!currentLot) return;
+  tbody.innerHTML = html;
+  document.getElementById("spec_total_feeded").innerText = `${totalWeight.toFixed(1)} KG`;
+  document.getElementById("roll_no_input").value = String(maxRollNo + 1);
+  document.getElementById("tube_input").value = `T-${100 + maxRollNo + 1}`;
+}
 
-    const selOpt = lotSelect.options[lotSelect.selectedIndex];
-    currentNeedles = selOpt ? (selOpt.getAttribute('data-needles') || '24N') : '24N';
+// 5. Live 5-Digit Machine Barcode Lookup
+async function handleMachineBarcodeLive(barcodeVal) {
+  const code = (barcodeVal || "").replace(/\D/g, "");
+  document.getElementById("machine_barcode_input").value = code;
 
-    cascadeStatus.innerText = 'Loading Lot Rolls...';
-    try {
-      const url = `/api/lot-rolls?wo=${encodeURIComponent(currentWo)}&bag=${encodeURIComponent(currentBag)}&lot=${encodeURIComponent(currentLot)}`;
-      const res = await fetch(url);
-      const data = await res.json();
-
-      if (data.success) {
-        renderLotDetailsAndRolls(data.summary, data.rolls);
-      }
-
-      // Auto-fetch and auto-populate matching machine barcode for this Job / Needle / Shade / WO
-      try {
-        const autoUrl = `/api/auto-machine-barcode?wo=${encodeURIComponent(currentWo)}&shade=${encodeURIComponent(currentShade)}&needles=${encodeURIComponent(currentNeedles)}`;
-        const autoRes = await fetch(autoUrl);
-        const autoData = await autoRes.json();
-        if (autoData && autoData.unique_code) {
-          machineBarcodeInput.value = autoData.unique_code;
-          verifyAndApplyBarcode(autoData.unique_code, false);
-        }
-      } catch (err) {
-        console.warn('Auto barcode fetch error:', err);
-      }
-    } catch (e) {
-      console.warn('Error loading lot rolls:', e);
-    }
+  if (code.length !== 5) {
+    document.getElementById("spec_match_box").classList.add("hidden");
+    return;
   }
 
-  function renderLotDetailsAndRolls(summary, rolls) {
-    currentLotRolls = rolls || [];
-    existingRollNumbers = new Set(currentLotRolls.map(r => parseInt(r.roll_no, 10)));
+  try {
+    const res = await fetch(`/api/machine/verify?code=${encodeURIComponent(code)}`);
+    const data = await res.json();
 
-    // Update Right Section Lot Details Banner
-    detailNeedles.innerText = summary.lot_needles || currentNeedles;
-    detailShade.innerText = summary.bag_shade || currentShade || 'Standard';
-    detailTotalFeeded.innerText = `${(summary.total_weight || 0).toFixed(2)} KG`;
-    detailBalance.innerText = `${(summary.rem_weight !== undefined ? summary.rem_weight : 0).toFixed(1)} KG`;
-    lotStatusBadge.innerText = `${currentLot} Active`;
-    lotStatusBadge.className = 'px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800';
+    if (data.success && data.machine) {
+      const m = data.machine;
+      const expectedWo = (currentWo || "").toLowerCase().trim();
+      const expectedShade = (currentBagObj?.shade || "").toLowerCase().trim();
+      const expectedNeedles = (currentLotObj?.needles || "24N").toLowerCase().trim();
 
-    rollsCountTag.innerText = `${summary.total_rolls || 0} Rolls`;
-    rollsTableSubtitle.innerText = `${currentWo} &bull; ${currentBag} &bull; ${currentLot}`;
+      const machWo = (m.work_order || "").toLowerCase().trim();
+      const machShade = (m.shade || "").toLowerCase().trim();
+      const machNeedles = (m.needles || "24N").toLowerCase().trim();
 
-    // Auto assign next sequential roll number
-    rollNoInput.value = summary.next_roll_no || 1;
-    rollNoHint.innerText = `Auto: Roll #${summary.next_roll_no || 1}`;
-    checkMergeStatus();
+      const woMatch = !expectedWo || !machWo || expectedWo === machWo || expectedWo.includes(machWo) || machWo.includes(expectedWo);
+      const shadeMatch = !expectedShade || !machShade || expectedShade === machShade;
+      const needlesMatch = !expectedNeedles || !machNeedles || expectedNeedles === machNeedles;
 
-    // Summary Strip in one line: Already Feed Barcode, Job/WO, Shade, Machine
-    if (summary.latest_roll && summary.latest_roll.barcode) {
-      latestFeedBarcode = summary.latest_roll.barcode;
-      stripFeedBarcode.innerText = latestFeedBarcode;
-      stripJobWo.innerText = summary.latest_roll.job_wo || currentWo;
-      stripShade.innerText = summary.latest_roll.shade || currentShade || '--';
-      stripMachine.innerText = summary.latest_roll.machine_no || 'M-01';
-      stripNeedles.innerText = summary.lot_needles || currentNeedles;
-
-      // Auto populate machine barcode if present
-      if (summary.latest_roll.machine_barcode && !machineBarcodeInput.value) {
-        machineBarcodeInput.value = summary.latest_roll.machine_barcode;
-        verifyAndApplyBarcode(summary.latest_roll.machine_barcode, false);
-      }
-
-      alreadyFeedStrip.classList.remove('hidden');
-    } else {
-      alreadyFeedStrip.classList.add('hidden');
-    }
-
-    // Populate Right Section Table
-    feededRollsTbody.innerHTML = '';
-    if (currentLotRolls.length === 0) {
-      feededRollsTbody.innerHTML = `
-        <tr>
-          <td colspan="6" class="p-6 text-center text-slate-400 font-sans text-xs">
-            Is Lot mein abhi tak koi roll feed nahi hua. Pehla roll feed karein (Roll #1).
-          </td>
-        </tr>
-      `;
-    } else {
-      currentLotRolls.forEach(r => {
-        const isMerged = r.is_merged > 0;
-        const tr = document.createElement('tr');
-        tr.className = 'hover:bg-slate-50 transition-colors';
-        tr.innerHTML = `
-          <td class="p-2 font-bold text-slate-900">
-            #${r.roll_no}
-            ${isMerged ? `<span class="px-1.5 py-0.2 bg-amber-100 text-amber-800 rounded text-[9px] font-sans font-semibold">Merged</span>` : ''}
-          </td>
-          <td class="p-2 font-bold text-slate-800">${parseFloat(r.weight).toFixed(2)} KG</td>
-          <td class="p-2 text-slate-600">${r.tube_no || 'T-101'}</td>
-          <td class="p-2 text-slate-500 text-[10px]">${r.created_at || '--'}</td>
-          <td class="p-2 font-mono text-[10px] text-emerald-700 font-bold">${r.roll_barcode || '--'}</td>
-          <td class="p-2 text-center">
-            <button 
-              type="button" 
-              onclick='showStickerFromRow(${JSON.stringify(r)})' 
-              class="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 text-white rounded text-[10px] cursor-pointer"
-              title="Print Thermal Sticker"
-            >
-              <i class="fa-solid fa-print"></i>
-            </button>
-          </td>
-        `;
-        feededRollsTbody.appendChild(tr);
-      });
-    }
-
-    cascadeStatus.innerText = 'Ready to Record';
-    cascadeStatus.className = 'text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-emerald-600 text-white font-semibold';
-  }
-
-  // ================= MERGE ROLL DETECTION =================
-  rollNoInput.addEventListener('input', checkMergeStatus);
-  rollNoInput.addEventListener('change', checkMergeStatus);
-
-  function checkMergeStatus() {
-    const entered = parseInt(rollNoInput.value, 10);
-    if (!isNaN(entered) && existingRollNumbers.has(entered)) {
-      mergeAlertNotice.classList.remove('hidden');
-      mergeAlertText.innerText = `⚠️ Notice: Roll #${entered} is Lot mein already feed hai. Save karne par naya weight Roll #${entered} mein MERGE ho jayega!`;
-    } else {
-      mergeAlertNotice.classList.add('hidden');
-    }
-  }
-
-  // Copy Strip Barcode Helper
-  function copyStripBarcode() {
-    if (!latestFeedBarcode) return;
-    navigator.clipboard.writeText(latestFeedBarcode).then(() => {
-      const btnText = document.getElementById('copy_btn_text');
-      btnText.innerText = 'Copied!';
-      setTimeout(() => { btnText.innerText = 'Copy'; }, 1800);
-    }).catch(() => {
-      alert(`Barcode: ${latestFeedBarcode}`);
-    });
-  }
-
-  // ================= 5. MACHINE BARCODE VERIFICATION =================
-  machineBarcodeInput.addEventListener('input', function() {
-    const code = this.value.trim();
-    if (code.length === 5) {
-      verifyAndApplyBarcode(code, true);
-    } else {
-      machineSpecBadge.classList.add('hidden');
-      activeMachineData = null;
-    }
-  });
-
-  async function verifyAndApplyBarcode(code, showModalOnError = false) {
-    try {
-      const res = await fetch('/api/machine-barcode/' + encodeURIComponent(code));
-      const data = await res.json();
-      if (!data.found) {
-        activeMachineData = null;
-        machineSpecBadge.classList.remove('hidden');
-        machineSpecBadge.className = 'mt-3 p-3 bg-rose-50 rounded-xl border border-rose-300 text-xs';
-        badgeMachineNo.innerText = 'NOT FOUND';
-        badgeMachineNo.className = 'px-2 py-0.5 rounded bg-rose-700 text-white font-mono text-[11px] font-bold';
-        badgeSpecs.innerText = `5-Digit Barcode '${code}' is not registered!`;
-        badgeMatchStatus.innerText = 'INVALID BARCODE';
-        badgeMatchStatus.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-200 text-rose-800';
-
-        if (showModalOnError) {
-          showMismatchModal(
-            '⚠️ Invalid Machine Barcode',
-            `5-Digit Barcode '${code}' Machine Sign-In (/machine-sign) mein nahi mila! Pehle machine sign-in karein.`,
-            [{ param: '5-Digit Barcode', machineVal: code, lotVal: 'Unregistered', match: false }]
-          );
-        }
-        return false;
-      }
-
-      activeMachineData = data;
-      machineSpecBadge.classList.remove('hidden');
-      badgeMachineNo.innerText = data.machine_no || 'M-??';
-      badgeMachineNo.className = 'px-2 py-0.5 rounded bg-slate-900 text-white font-mono text-[11px] font-bold';
-      badgeSpecs.innerText = `Needles: ${data.needles || '--'} | Shade: ${data.shade || 'Any'} | WO: ${data.work_order || '--'}`;
-
-      return checkMatches(showModalOnError);
-    } catch (e) {
-      console.warn('Error verifying barcode:', e);
-      return false;
-    }
-  }
-
-  function checkMatches(triggerModal = false) {
-    if (!activeMachineData) return false;
-
-    const mNeedles = (activeMachineData.needles || '').trim().toUpperCase();
-    const lNeedles = (currentNeedles || '').trim().toUpperCase();
-
-    const mShade = (activeMachineData.shade || '').trim().toLowerCase();
-    const lShade = (currentShade || '').trim().toLowerCase();
-
-    const mWo = (activeMachineData.work_order || '').trim().toUpperCase();
-    const lWo = (currentWo || '').trim().toUpperCase();
-
-    const clean = (s) => (s || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-    const cmN = clean(mNeedles), clN = clean(lNeedles);
-    const cmW = clean(mWo), clW = clean(lWo);
-    const cmS = clean(mShade), clS = clean(lShade);
-
-    // Strict 3-Field Match: Work Order, Shade, and Needles must exactly match
-    const needlesMatch = Boolean(cmN && clN && cmN === clN);
-    const woMatch = Boolean(cmW && clW && cmW === clW);
-    const shadeMatch = Boolean(!cmS || !clS || cmS === clS);
-
-    const allMatch = needlesMatch && woMatch && shadeMatch;
-
-    const rows = [
-      { param: 'Needles Spec', machineVal: mNeedles || '--', lotVal: lNeedles || '--', match: needlesMatch },
-      { param: 'Work Order', machineVal: mWo || '--', lotVal: lWo || '--', match: woMatch },
-      { param: 'Fabric Shade', machineVal: activeMachineData.shade || '--', lotVal: currentShade || '--', match: shadeMatch }
-    ];
-
-    if (allMatch) {
-      machineSpecBadge.className = 'mt-3 p-3 bg-emerald-50 rounded-xl border border-emerald-300 text-xs';
-      badgeMatchStatus.innerText = '✅ 100% SPEC MATCH';
-      badgeMatchStatus.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800';
-      return true;
-    } else {
-      machineSpecBadge.className = 'mt-3 p-3 bg-rose-50 rounded-xl border border-rose-300 text-xs';
-      badgeMatchStatus.innerText = '❌ SPEC MISMATCH';
-      badgeMatchStatus.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-200 text-rose-800';
-
-      if (triggerModal) {
-        let msg = 'Specifications mismatch: ';
-        if (!needlesMatch) msg += `Needles Lot (${lNeedles}) aur Machine Barcode (${mNeedles}) match nahi kar rahi! `;
-        if (!shadeMatch) msg += `Shade Bag (${currentShade}) aur Machine Barcode (${activeMachineData.shade}) match nahi kar rahe! `;
-        if (!woMatch) msg += `Work Order selected (${lWo}) aur Machine Barcode (${mWo}) match nahi kar rahe! `;
-
-        showMismatchModal('🚨 Machine Barcode Specification Mismatch!', msg, rows);
-      }
-      return false;
-    }
-  }
-
-  // ================= 6. FORM SUBMISSION & SAVE ROLL =================
-  document.getElementById('save_roll_form').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    formErrorBox.classList.add('hidden');
-
-    if (!currentWo || !currentPlan || !currentBag || !currentLot) {
-      alert('Pehle Work Order, Plan, Bag aur Lot select karein!');
-      return;
-    }
-
-    const barcode = machineBarcodeInput.value.trim();
-    const weight = parseFloat(weightInput.value);
-    const tube = tubeInput.value.trim() || 'T-101';
-    const rollNo = rollNoInput.value.trim();
-
-    if (!barcode || barcode.length !== 5) {
-      showMismatchModal(
-        '⚠️ Missing Machine Barcode',
-        'Roll feed karne ke liye 5-Digit Machine Barcode scan ya type karna lazmi hai!',
-        [{ param: '5-Digit Barcode', machineVal: barcode || 'Missing', lotVal: '5 Digits Required', match: false }]
-      );
-      return;
-    }
-
-    const matchesOk = checkMatches(true);
-    if (!matchesOk) return;
-
-    if (isNaN(weight) || weight <= 0) {
-      formErrorBox.innerText = 'Please enter a valid weight in KG.';
-      formErrorBox.classList.remove('hidden');
-      return;
-    }
-
-    saveRollBtn.disabled = true;
-    saveRollBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
-
-    const payload = {
-      work_order: currentWo,
-      plan_id: currentPlan,
-      bag_number: currentBag,
-      lot_name: currentLot,
-      needles: currentNeedles,
-      weight: weight,
-      tube_no: tube,
-      barcode: barcode,
-      roll_no: rollNo
-    };
-
-    try {
-      const res = await fetch('/api/save-roll', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-
-      saveRollBtn.disabled = false;
-      saveRollBtn.innerHTML = '<i class="fa-solid fa-print"></i> <span>Feed Roll</span>';
-
-      if (!data.success) {
-        if (data.mismatch_type) {
-          showMismatchModal(
-            '🚨 Server Validation Mismatch!',
-            data.message || 'Specifications do not match Machine Barcode.',
-            [{ param: 'Server Check', machineVal: barcode, lotVal: currentNeedles, match: false }]
-          );
-        } else {
-          formErrorBox.innerText = data.message || 'Error saving roll';
-          formErrorBox.classList.remove('hidden');
-        }
+      if (woMatch && shadeMatch && needlesMatch) {
+        document.getElementById("spec_match_box").classList.remove("hidden");
+        document.getElementById("spec_match_message").innerText = `100% SPEC MATCH: Machine M#${m.machine_no} verified! All 3 specifications match.`;
+        document.getElementById("v_wo").innerText = currentWo || m.work_order || "--";
+        document.getElementById("v_shade").innerText = currentBagObj?.shade || m.shade || "--";
+        document.getElementById("v_needles").innerText = currentLotObj?.needles || m.needles || "24N";
+        document.getElementById("v_machine").innerText = m.machine_no || "M-01";
       } else {
-        // Show Thermal Printable Sticker Modal immediately
-        showStickerModal(data.sticker_data, data.is_merged);
-
-        // Advance tube number
-        const tubeMatch = tube.match(/\d+/);
-        if (tubeMatch) {
-          tubeInput.value = `T-${parseInt(tubeMatch[0], 10) + 1}`;
-        }
-        weightInput.value = '';
-
-        // Reload lot rolls list
-        handleLotSelected(currentLot);
+        document.getElementById("spec_match_box").classList.add("hidden");
       }
-    } catch (err) {
-      console.error(err);
-      formErrorBox.innerText = 'Network error while saving roll. Please try again.';
-      formErrorBox.classList.remove('hidden');
-      saveRollBtn.disabled = false;
-      saveRollBtn.innerHTML = '<i class="fa-solid fa-print"></i> <span>Feed Roll</span>';
+    } else {
+      document.getElementById("spec_match_box").classList.add("hidden");
     }
-  });
+  } catch (err) {
+    console.error("Machine verify error:", err);
+  }
+}
 
-  // ================= 7. PRINTABLE STICKER GENERATOR & MODAL =================
-  function showStickerModal(stk, isMerged = false) {
-    if (!stk) return;
-    document.getElementById('stk_bag').innerText = stk.bag || currentBag;
-    document.getElementById('stk_lot').innerText = stk.lot || currentLot;
-    document.getElementById('stk_roll_no').innerText = `${stk.roll_no}${isMerged ? ' (M)' : ''}`;
-    document.getElementById('stk_job_wo').innerText = stk.job_wo || currentWo;
-    document.getElementById('stk_needle').innerText = stk.needle || currentNeedles;
-    document.getElementById('stk_machine').innerText = stk.machine || 'M-01';
-    document.getElementById('stk_weight').innerText = `${parseFloat(stk.weight).toFixed(2)} KG`;
-    document.getElementById('stk_barcode_text').innerText = stk.roll_barcode || '--';
-
-    // Render Laser Scannable Barcode SVG
-    renderBarcodeSVG('stk_barcode_svg', stk.roll_barcode || 'R-00-00');
-
-    document.getElementById('thermal_sticker_modal').classList.remove('hidden');
+// 6. Handle Feed Roll Submission
+async function handleFeedRollSubmit(e) {
+  e.preventDefault();
+  if (!currentWo || !currentPlan || !currentBag || !currentLot) {
+    showMismatchModal("Missing Required Selection", "Pehle Work Order, Plan, Bag aur Lot select karein.");
+    return;
   }
 
-  function showStickerFromRow(r) {
-    const stk = {
+  const barcode = document.getElementById("machine_barcode_input").value.trim();
+  if (barcode.length !== 5) {
+    showMismatchModal("5-Digit Machine Barcode Required", "Please enter valid 5-digit signed machine barcode.");
+    return;
+  }
+
+  const weight = parseFloat(document.getElementById("weight_input").value);
+  if (isNaN(weight) || weight <= 0) {
+    showMismatchModal("Invalid Weight", "Please enter positive weight in KG.");
+    return;
+  }
+
+  const rollNo = document.getElementById("roll_no_input").value;
+  const tube = document.getElementById("tube_input").value;
+  const needles = currentLotObj?.needles || "24N";
+  const shade = currentBagObj?.shade || "";
+
+  const formData = new URLSearchParams();
+  formData.append("work_order", currentWo);
+  formData.append("plan_id", currentPlan);
+  formData.append("bag", currentBag);
+  formData.append("shade", shade);
+  formData.append("lot", currentLot);
+  formData.append("weight", weight);
+  formData.append("tube", tube);
+  formData.append("needles", needles);
+  formData.append("barcode", barcode);
+  formData.append("machine_barcode", barcode);
+  formData.append("roll_no", rollNo);
+
+  try {
+    const res = await fetch("/roll-entry/form", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: formData.toString()
+    });
+
+    // Refresh roll table and open thermal sticker
+    await loadFeededRollsForLot();
+
+    const cleanBag = currentBag.replace(/\s+/g, '');
+    const genBarcode = `R-${cleanBag}-${String(rollNo).padStart(2, '0')}`;
+    
+    openStickerModal({
       bag: currentBag,
       lot: currentLot,
-      roll_no: r.roll_no,
-      job_wo: currentWo,
-      needle: r.needles || currentNeedles,
-      machine: r.machine_no || 'M-01',
-      weight: r.weight,
-      roll_barcode: r.roll_barcode
-    };
-    showStickerModal(stk, r.is_merged > 0);
-  }
-
-  function closeStickerModal() {
-    document.getElementById('thermal_sticker_modal').classList.add('hidden');
-    weightInput.focus();
-  }
-
-  function printStickerNow() {
-    window.print();
-  }
-
-  // Self-Contained SVG Barcode Generator (Code128 / Scan-Ready)
-  function renderBarcodeSVG(svgId, code) {
-    const svg = document.getElementById(svgId);
-    if (!svg) return;
-    svg.innerHTML = '';
-
-    // Simple robust high-density barcode representation
-    let hash = 0;
-    for (let i = 0; i < code.length; i++) {
-      hash = (hash << 5) - hash + code.charCodeAt(i);
-      hash |= 0;
-    }
-
-    const width = 240;
-    const height = 45;
-    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-    svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-
-    // Generate readable bar pattern
-    let x = 10;
-    const barWidths = [1, 2, 3, 1, 2, 1, 3, 2, 1, 2, 3, 1, 1, 2];
-    
-    // Quiet zone start
-    let html = `<rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"/>`;
-    
-    // Start guards
-    html += `<rect x="${x}" y="2" width="2" height="${height - 4}" fill="#000000"/>`; x += 4;
-    html += `<rect x="${x}" y="2" width="2" height="${height - 4}" fill="#000000"/>`; x += 4;
-
-    for (let i = 0; i < code.length; i++) {
-      const charCode = code.charCodeAt(i);
-      const patternIdx = (charCode + i) % barWidths.length;
-      const bw = barWidths[patternIdx];
-      html += `<rect x="${x}" y="2" width="${bw}" height="${height - 4}" fill="#000000"/>`;
-      x += bw + (i % 2 === 0 ? 2 : 3);
-      if (x > width - 15) break;
-    }
-
-    // Stop guards
-    html += `<rect x="${x}" y="2" width="2" height="${height - 4}" fill="#000000"/>`; x += 3;
-    html += `<rect x="${x}" y="2" width="3" height="${height - 4}" fill="#000000"/>`;
-
-    svg.innerHTML = html;
-  }
-
-  // Mismatch Modal Helpers
-  function showMismatchModal(title, message, rows) {
-    document.getElementById('mismatch_modal_title').innerText = title || '🚨 Specification Mismatch!';
-    document.getElementById('mismatch_modal_msg').innerText = message || 'Selected specifications do not match Machine Barcode.';
-    const tbody = document.getElementById('mismatch_comparison_tbody');
-    tbody.innerHTML = '';
-    (rows || []).forEach(r => {
-      const isOk = r.match;
-      tbody.innerHTML += `
-        <tr class="${isOk ? 'bg-emerald-50/40 text-slate-800' : 'bg-rose-50/80 text-rose-900 font-bold'}">
-          <td class="p-2 border-b">${r.param}</td>
-          <td class="p-2 border-b font-mono">${r.machineVal || '--'}</td>
-          <td class="p-2 border-b font-mono">${r.lotVal || '--'}</td>
-          <td class="p-2 border-b text-center">
-            ${isOk ? '<span class="text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded text-[11px]">✅ Match</span>' : '<span class="text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded text-[11px]">❌ MISMATCH</span>'}
-          </td>
-        </tr>
-      `;
+      roll_no: rollNo,
+      job_wo: `Job-1/${currentWo}`,
+      needle: needles,
+      shade: shade,
+      machine: document.getElementById("v_machine").innerText || "M-01",
+      weight: weight,
+      tube: tube,
+      barcode: genBarcode,
+      date: new Date().toISOString().replace('T', ' ').substring(0, 16)
     });
-    document.getElementById('mismatch_modal').classList.remove('hidden');
+
+  } catch (err) {
+    console.error("Roll submit error:", err);
   }
+}
 
-  function closeMismatchModal() {
-    document.getElementById('mismatch_modal').classList.add('hidden');
+// Modals Handling
+function showMismatchModal(title, msg) {
+  document.getElementById("mismatch_modal_title").innerText = title;
+  document.getElementById("mismatch_modal_msg").innerText = msg;
+  document.getElementById("m_lot_needles").innerText = currentLotObj?.needles || "24N";
+  document.getElementById("m_lot_shade").innerText = currentBagObj?.shade || "--";
+  document.getElementById("m_lot_wo").innerText = currentWo || "--";
+  document.getElementById("mismatch_modal").classList.remove("hidden");
+}
+
+function closeMismatchModal() {
+  document.getElementById("mismatch_modal").classList.add("hidden");
+}
+
+function openStickerModal(stk) {
+  document.getElementById("stk_bag").innerText = stk.bag || "--";
+  document.getElementById("stk_lot").innerText = stk.lot || "--";
+  document.getElementById("stk_roll_no").innerText = stk.roll_no || "--";
+  document.getElementById("stk_job_wo").innerText = stk.job_wo || "--";
+  document.getElementById("stk_needle").innerText = stk.needle || "--";
+  document.getElementById("stk_machine").innerText = stk.machine || "M-01";
+  document.getElementById("stk_weight").innerText = `${parseFloat(stk.weight || 0).toFixed(2)} KG`;
+  document.getElementById("stk_shade").innerText = stk.shade || "--";
+  document.getElementById("stk_barcode").innerText = stk.barcode || "R-00-00";
+  document.getElementById("stk_tube").innerText = stk.tube || "T-101";
+  document.getElementById("stk_date").innerText = stk.date || "--";
+  document.getElementById("thermal_sticker_modal").classList.remove("hidden");
+}
+
+function openStickerModalDirect(r) {
+  openStickerModal({
+    bag: r.bag_number || currentBag,
+    lot: r.lot_name || currentLot,
+    roll_no: r.roll_no,
+    job_wo: `Job-1/${r.work_order || currentWo}`,
+    needle: r.needles || currentLotObj?.needles || "24N",
+    shade: currentBagObj?.shade || "--",
+    machine: r.machine_no || "M-01",
+    weight: r.weight,
+    tube: r.tube_no || "T-101",
+    barcode: r.roll_barcode,
+    date: r.created_at
+  });
+}
+
+function closeStickerModal() {
+  document.getElementById("thermal_sticker_modal").classList.add("hidden");
+}
+
+function printSticker() {
+  window.print();
+}
+
+function copyStripBarcode() {
+  const code = document.getElementById("strip_feed_barcode").innerText;
+  if (code && code !== "--") {
+    navigator.clipboard.writeText(code);
+    document.getElementById("copy_btn_text").innerText = "Copied!";
+    setTimeout(() => {
+      document.getElementById("copy_btn_text").innerText = "Copy";
+    }, 2000);
   }
+}
 
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      closeMismatchModal();
-      closeStickerModal();
-    }
-  });
+function triggerExportPlanModal() {
+  if (typeof openExportPlanModal === "function") {
+    openExportPlanModal(currentWo);
+  }
+}
 
-  // On initial page load
-  window.addEventListener('DOMContentLoaded', () => {
-    const firstOption = document.querySelector('#wo_datalist option');
-    if (firstOption && !woInput.value) {
-      woInput.value = firstOption.value;
-      handleWoSelected(firstOption.value);
-    }
-  });
+function resetSummaryCards() {
+  document.getElementById("spec_lot_badge").innerText = "--";
+  document.getElementById("spec_lot_needles").innerText = "--";
+  document.getElementById("spec_bag_shade").innerText = "--";
+  document.getElementById("spec_total_feeded").innerText = "0.0 KG";
+  document.getElementById("spec_rem_balance").innerText = "0.0 KG";
+  document.getElementById("spec_match_box").classList.add("hidden");
+}
 </script>
 {% endblock %}
-

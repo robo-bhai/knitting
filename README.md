@@ -111,13 +111,11 @@ Production-grade, enterprise-scale Garment & Textile Manufacturing ERP system de
 
 ## 🚀 Local Installation & Running Guide
 
-You have two flexible ways to run this application:
-- **Option 1: Modern Interactive React SPA (Vite)**
-- **Option 2: Full-Stack Python Flask Backend Server**
+> **Note on UI:** The interface you see in the Google AI Studio preview is the **React SPA (Vite)** on port 3000. When you clone this project to your local computer or VPS, run **`npm run dev`** to get the exact same interface at `http://localhost:3000`. We have also redesigned the Python Flask web template (`templates/roll_entry_form.html`) to be a 100% pixel-perfect replica of the React Roll Entry Form, so both options now deliver the exact same UI!
 
 ---
 
-### Option 1: Running the React Frontend (Node.js & Vite)
+### Option 1: Running the React Frontend (Node.js & Vite) - *Matches AI Studio Preview 100%*
 
 1. **Clone the repository**:
    ```bash
@@ -134,7 +132,7 @@ You have two flexible ways to run this application:
    ```bash
    npm run dev
    ```
-   Open your browser at `http://localhost:3000`.
+   Open your browser at `http://localhost:3000`. You will see the **exact** layout, cards, badges, and modals shown in AI Studio!
 
 4. **Build for production**:
    ```bash

@@ -1470,12 +1470,9 @@ def api_auto_machine_barcode():
         con.close()
 
 @app.route("/roll-entry")
-@role_required(['clerk', 'incharge', 'manager'])
+@role_required(['clerk', 'incharge', 'manager', 'admin'])
 def roll_entry():
-    con = db(); cur = con.cursor()
-    work_orders = get_ready_work_orders(cur)
-    con.close()
-    return render_template("roll_entry_select.html", work_orders=work_orders)
+    return redirect(url_for('roll_entry_form'))
 
 @app.route("/api/plans")
 @app.route("/api/plans/<path:work_order>")
@@ -1974,6 +1971,26 @@ def api_validate_roll_match():
     finally:
         con.close()
 
+@app.route("/api/machine/verify")
+def api_machine_verify():
+    code = (request.args.get("code") or request.args.get("barcode") or "").strip()
+    if not code:
+        return jsonify({"success": False, "message": "Code is required"}), 400
+    con = db(); cur = con.cursor()
+    try:
+        cur.execute("SELECT * FROM machine_assignments WHERE TRIM(unique_code) = ? OR unique_code = ? ORDER BY id DESC LIMIT 1", (code, code))
+        row = cur.fetchone()
+        if row:
+            m_dict = to_dict(row)
+            return jsonify({"success": True, "machine": m_dict})
+        else:
+            return jsonify({"success": False, "message": "Machine barcode not found"})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        con.close()
+
+@app.route("/api/feeded-rolls")
 @app.route("/api/lot-rolls")
 def api_lot_rolls():
     wo = (request.args.get("wo") or request.args.get("work_order") or "").strip()

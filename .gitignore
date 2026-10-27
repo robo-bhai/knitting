@@ -4,5 +4,19 @@ dist/
 coverage/
 .DS_Store
 *.log
-.env*
+.aistudio/
+public/assets/aistudio/
+.env
+.env.local
+.env.*.local
 !.env.example
+
+# Python & Databases
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+database.db
+*.sqlite3

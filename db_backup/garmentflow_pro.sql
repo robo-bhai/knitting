@@ -37,7 +37,7 @@ CREATE TABLE `bags` (
   `shade` varchar(255) DEFAULT NULL,
   `created_at` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -46,7 +46,7 @@ CREATE TABLE `bags` (
 
 LOCK TABLES `bags` WRITE;
 /*!40000 ALTER TABLE `bags` DISABLE KEYS */;
-INSERT INTO `bags` VALUES (1,1,'341028','Red','2026-10-26');
+INSERT INTO `bags` VALUES (1,1,'341028','Red','2026-10-26'),(2,1,'341029','Light Khaki','2026-10-27');
 /*!40000 ALTER TABLE `bags` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -632,4 +632,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-10-27  7:45:04
+-- Dump completed on 2026-10-27  7:46:07
